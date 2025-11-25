@@ -1,17 +1,15 @@
-import { useState, useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { Connection, clusterApiUrl, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { SolanaConnect } from "./connect_wallet";
 import { FaVolumeUp, FaVolumeMute } from "react-icons/fa";
-import { useWallet } from "@solana/wallet-adapter-react";
-import { Connection, LAMPORTS_PER_SOL } from "@solana/web3.js";
-import { clusterApiUrl } from "@solana/web3.js";
-
-
 
 export default function Header() {
   const [audioPlaying, setAudioPlaying] = useState(false);
   const audioRef = useRef(null);
   const { publicKey, connected } = useWallet();
-  const [balance, setBalance] = useState(null); 
+  const [balance, setBalance] = useState(null);
+
   useEffect(() => {
     const audioEl = document.getElementById("bg-audio");
     if (!audioEl) {
@@ -20,29 +18,22 @@ export default function Header() {
     }
     audioRef.current = audioEl;
 
-    // Настройки
     audioEl.loop = true;
     audioEl.volume = 0.5;
     audioEl.muted = true; // стартуем muted, чтобы автоплей был разрешён
 
-    // Попытка проиграть — может вернуть промис или undefined
     try {
       const playResult = audioEl.play();
-      // если playResult — промис, ловим ошибки
       if (playResult && typeof playResult.then === "function") {
         playResult.catch((err) => {
           console.log("Автоплей заблокирован (catch):", err);
         });
-      } else {
-        // playResult undefined — ничего дальше не делаем
-        console.log("audio.play() не вернул промис (возможно старый браузер)");
       }
     } catch (err) {
       console.log("Ошибка при попытке play():", err);
     }
 
     return () => {
-      // не останавливаем аудио (оно живёт в index.html), просто очищаем реф
       audioRef.current = null;
     };
   }, []);
@@ -53,12 +44,16 @@ export default function Header() {
     const connection = new Connection(clusterApiUrl("devnet"));
 
     const updateBalance = async () => {
-      const lamports = await connection.getBalance(publicKey);
-      setBalance(lamports / LAMPORTS_PER_SOL);
+      try {
+        const lamports = await connection.getBalance(publicKey);
+        setBalance(lamports / LAMPORTS_PER_SOL);
+      } catch (e) {
+        console.warn("Failed to fetch balance:", e);
+      }
     };
 
     updateBalance();
-    const interval = setInterval(updateBalance, 2000); // обновление каждые 10 секунд
+    const interval = setInterval(updateBalance, 2000);
     return () => clearInterval(interval);
   }, [connected, publicKey]);
 
@@ -73,7 +68,6 @@ export default function Header() {
       a.pause();
       setAudioPlaying(false);
     } else {
-      // пользовательский клик — можно снимать muted и включать звук
       a.muted = false;
       try {
         const playResult = a.play();
@@ -97,100 +91,50 @@ export default function Header() {
         display: "flex",
         justifyContent: "space-between",
         alignItems: "center",
-        borderRadius: "5px"
+        borderRadius: "5px",
+        position: "sticky",   // чтобы не накрывался контентом
+        top: 0,
+        zIndex: 2000,
+        background: "transparent",
       }}
     >
-      {/* <a href="/" style={{ textDecoration: "none", color:"inherit", fontFamily: "MyFont", fontSize: "32px", margin: 0 }}>
-        Атмосферный казик
-      </a>
-      <a href="/slot" style={{ textDecoration: "none", color:"inherit", fontFamily: "MyFont", fontSize: "25px", margin: 0 }}>
-        Слот машина
-      </a> */}
-
       <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-        <a
-          href="/"
-          style={{
-            textDecoration: "none",
-            color: "inherit",
-            fontFamily: "MyFont",
-            fontSize: "30px",
-            margin: 0,
-            
-          }}
-        >
+        <a href="/" style={{ textDecoration: "none", color: "#512DA8", fontFamily: "MyFont", fontSize: "30px", margin: 0 }}>
           Атмосферный казик
         </a>
 
-        <a
-          href="/slot"
-          style={{
-            textDecoration: "none",
-            color: "inherit",
-            fontFamily: "MyFont",
-            fontSize: "23px",
-            margin: 0,
-            marginTop: "3.8px"
-          }}
-        >
+        <a href="/slot" style={{ textDecoration: "none", color: "#512DA8", fontFamily: "MyFont", fontSize: "23px", margin: 0, marginTop: "3.8px" }}>
           Слот машина
         </a>
 
-        <a
-          href="/scratch-maps"
-          style={{
-            textDecoration: "none",
-            color: "inherit",
-            fontFamily: "MyFont",
-            fontSize: "23px",
-            margin: 0,
-            marginTop: "3.8px"
-          }}
-        >
+        <a href="/scratch-maps" style={{ textDecoration: "none", color: "#512DA8", fontFamily: "MyFont", fontSize: "23px", margin: 0, marginTop: "3.8px" }}>
           Скретч-карты
         </a>
 
-        <a
-          href="/cube"
-          style={{
-            textDecoration: "none",
-            color: "inherit",
-            fontFamily: "MyFont",
-            fontSize: "23px",
-            margin: 0,
-            marginTop: "3.8px"
-          }}
-        >
+        <a href="/cube" style={{ textDecoration: "none", color: "#512DA8", fontFamily: "MyFont", fontSize: "23px", margin: 0, marginTop: "3.8px" }}>
           Бросок кубика
         </a>
 
-        <a
-          href="/fortune-wheel"
-          style={{
-            textDecoration: "none",
-            color: "inherit",
-            fontFamily: "MyFont",
-            fontSize: "23px",
-            margin: 0,
-            marginTop: "3.8px"
-          }}
-        >
+        <a href="/fortune-wheel" style={{ textDecoration: "none", color: "#512DA8", fontFamily: "MyFont", fontSize: "23px", margin: 0, marginTop: "3.8px" }}>
           Колесо фортуны
         </a>
       </div>
 
-      
-      
-      
       <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
         <SolanaConnect />
 
         {connected && (
-          <p style={{fontSize: "18px", padding: "13px", backgroundColor: "#512DA8", borderRadius: "6px", fontFamily: 'MyFont',}}>
-            Баланс: {balance !== null ? balance.toFixed(4) + " SOL" : "Загрузка..."}
+          <p style={{
+            fontSize: "18px",
+            padding: "13px",
+            backgroundColor: "#512DA8",
+            borderRadius: "6px",
+            fontFamily: 'MyFont',
+            margin: 0,
+          }}>
+            Баланс: {balance !== null ? Number(balance).toFixed(9) + " SOL" : "Загрузка..."}
           </p>
         )}
-
 
         <button
           onClick={toggleAudio}
@@ -202,7 +146,7 @@ export default function Header() {
             borderRadius: "6px",
             cursor: "pointer",
             height: "48px",
-            width: "48px",        // квадратная кнопка для иконки
+            width: "48px",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
