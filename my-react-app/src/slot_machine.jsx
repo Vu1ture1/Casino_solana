@@ -13,13 +13,13 @@ import * as anchor from "@coral-xyz/anchor";
 import { AnchorProvider } from "@coral-xyz/anchor";
 import { Orao, randomnessAccountAddress, networkStateAccountAddress } from "@orao-network/solana-vrf";
 
-/* ====== Настройки ====== */
+
 const CLUSTER = "devnet";
 const RPC = clusterApiUrl(CLUSTER);
 const PROGRAM_ID = new PublicKey("6zSFSUhQ3qdFDXzqfTxg674pkF7JBoqbm6BmbGmc6DZ4");
 const VAULT_SEED = "vault_egor456_v3";
 const TREASURY_SEED = "treasury_egor456_v3";
-/* ======================= */
+
 
 export default function SlotMachinePage({
   images = [
@@ -58,10 +58,10 @@ export default function SlotMachinePage({
   const [balance, setBalance] = useState(null);
   const [result, setResult] = useState(null);
 
-  // multiplier state used in overlays
+
   const [x, setX] = useState(1.0);
 
-  // overlays
+
   const [showOverlayWin, setShowOverlayWin] = useState(false);
   const [showOverlayLoss, setShowOverlayLoss] = useState(false);
   const [showOverlayBigWin, setShowOverlayBigWin] = useState(false);
@@ -155,34 +155,62 @@ export default function SlotMachinePage({
     initAnchor();
   }, [connected, publicKey, wallet, connection]);
 
-  // parse SLOT_RESULT log
-  async function parseSlotResultFromTx(txSig) {
+  async function parseSlotResultFromTx(txSig, maxAttempts = 12) {
     if (!connection) throw new Error("connection not ready");
     addLog("Fetching tx logs: " + txSig);
-    const tx = await connection.getTransaction(txSig, { commitment: "confirmed" });
-    if (!tx || !tx.meta || !tx.meta.logMessages) throw new Error("No transaction logs available");
-    for (const line of tx.meta.logMessages) {
-      if (typeof line !== "string") continue;
-      const idx = line.indexOf("SLOT_RESULT:");
-      if (idx !== -1) {
-        const jsonStr = line.slice(idx + "SLOT_RESULT:".length).trim();
-        const obj = JSON.parse(jsonStr);
-        const payoutStr = String(obj.payout_net || 0);
-        return {
-          s0: obj.s0,
-          s1: obj.s1,
-          s2: obj.s2,
-          payoutNetLamports: payoutStr,
-          payoutNetSol: Number(payoutStr) / LAMPORTS_PER_SOL,
-        };
+    let attempt = 0;
+    let waitMs = 300;
+
+    while (attempt < maxAttempts) {
+      const tx = await connection.getTransaction(txSig, { commitment: "finalized" });
+      if (tx && tx.meta && Array.isArray(tx.meta.logMessages)) {
+        for (const line of tx.meta.logMessages) {
+          if (typeof line !== "string") continue;
+          const idx = line.indexOf("SLOT_RESULT:");
+          if (idx !== -1) {
+            const jsonStr = line.slice(idx + "SLOT_RESULT:".length).trim();
+            const obj = JSON.parse(jsonStr);
+            const payoutStr = String(obj.payout_net || 0);
+            return {
+              s0: obj.s0,
+              s1: obj.s1,
+              s2: obj.s2,
+              payoutNetLamports: payoutStr,
+              payoutNetSol: Number(payoutStr) / LAMPORTS_PER_SOL,
+            };
+          }
+        }
+        throw new Error("SLOT_RESULT not found in transaction logs");
+      }
+      await new Promise((res) => setTimeout(res, waitMs));
+      attempt += 1;
+      waitMs = Math.min(1500, Math.floor(waitMs * 1.5));
+    }
+
+    const txFinal = await connection.getTransaction(txSig, { commitment: "confirmed" });
+    if (txFinal && txFinal.meta && Array.isArray(txFinal.meta.logMessages)) {
+      for (const line of txFinal.meta.logMessages) {
+        if (typeof line !== "string") continue;
+        const idx = line.indexOf("SLOT_RESULT:");
+        if (idx !== -1) {
+          const jsonStr = line.slice(idx + "SLOT_RESULT:".length).trim();
+          const obj = JSON.parse(jsonStr);
+          const payoutStr = String(obj.payout_net || 0);
+          return {
+            s0: obj.s0,
+            s1: obj.s1,
+            s2: obj.s2,
+            payoutNetLamports: payoutStr,
+            payoutNetSol: Number(payoutStr) / LAMPORTS_PER_SOL,
+          };
+        }
       }
     }
-    throw new Error("SLOT_RESULT not found in transaction logs");
+
+    throw new Error("No transaction meta/logs available after retries");
   }
 
-  // client-side multiplier logic (match Rust)
   function getMultiplier(s0, s1, s2) {
-    // triples
     if (s0 === s1 && s1 === s2) {
       switch (s0) {
         case 0: return 100;
@@ -192,7 +220,6 @@ export default function SlotMachinePage({
         default: return 0;
       }
     }
-    // doubles
     if (s0 === s1 || s0 === s2 || s1 === s2) {
       const sym = (s0 === s1) ? s0 : (s0 === s2 ? s0 : s1);
       switch (sym) {
@@ -206,7 +233,6 @@ export default function SlotMachinePage({
     return 0;
   }
 
-  // map symbol -> image index
   function mapSymbolToIndex(symbol) {
     const n = images.length;
     if (n <= 4) return symbol % n;
@@ -219,6 +245,7 @@ export default function SlotMachinePage({
     if (!program) throw new Error("Program not ready");
     if (!vrfSdk) throw new Error("VRF SDK not ready");
     const payer = publicKey;
+
     const [vaultPda] = await PublicKey.findProgramAddress([Buffer.from(VAULT_SEED)], PROGRAM_ID);
     const [treasuryPda] = await PublicKey.findProgramAddress([Buffer.from(TREASURY_SEED)], PROGRAM_ID);
 
@@ -228,11 +255,31 @@ export default function SlotMachinePage({
     const networkStatePda = networkStateAccountAddress();
     addLog("Derived randomness PDA: " + randomPda.toBase58());
 
+    const [betPda] = await PublicKey.findProgramAddress([Buffer.from("bet"), randomPda.toBuffer()], PROGRAM_ID);
+    addLog("Derived Bet PDA: " + betPda.toBase58());
+
     const netState = await vrfSdk.getNetworkState();
+
+    try {
+      addLog("Placing bet");
+      const placeSig = await program.methods
+        .placeBet(new anchor.BN(betLamports))
+        .accounts({
+          player: payer,
+          randomnessAccount: randomPda,
+          bet: betPda,
+          vault: vaultPda,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+      addLog("place_bet tx: " + placeSig);
+    } catch (e) {
+      throw new Error("place_bet failed: " + (e?.message || e?.toString()));
+    }
 
     let requestSig;
     try {
-      addLog("Sending request_vrf (you will sign)...");
+      addLog("Sending request_vrf");
       requestSig = await program.methods
         .requestVrf([...seedBytes])
         .accounts({
@@ -246,7 +293,7 @@ export default function SlotMachinePage({
         .rpc();
       addLog("request_vrf tx: " + requestSig);
     } catch (e) {
-      throw new Error("request_vrf failed: " + (e.message || e.toString()));
+      throw new Error("request_vrf failed: " + (e?.message || e?.toString()));
     }
 
     try {
@@ -254,17 +301,18 @@ export default function SlotMachinePage({
       await vrfSdk.waitFulfilled(seedBytes);
       addLog("ORAO fulfilled randomness");
     } catch (e) {
-      throw new Error("waitFulfilled failed: " + (e.message || e.toString()));
+      throw new Error("waitFulfilled failed: " + (e?.message || e?.toString()));
     }
 
     let resolveSig;
     try {
-      addLog("Sending resolve_bet (you will sign)...");
+      addLog("Sending resolve_bet");
       resolveSig = await program.methods
-        .resolveBet(new anchor.BN(betLamports))
+        .resolveBet() 
         .accounts({
           player: payer,
           randomnessAccount: randomPda,
+          bet: betPda,
           vault: vaultPda,
           treasury: treasuryPda,
           systemProgram: SystemProgram.programId,
@@ -272,12 +320,13 @@ export default function SlotMachinePage({
         .rpc();
       addLog("resolve_bet tx: " + resolveSig);
     } catch (e) {
-      throw new Error("resolve_bet failed: " + (e.message || e.toString()));
+      throw new Error("resolve_bet failed: " + (e?.message || e?.toString()));
     }
 
     const parsed = await parseSlotResultFromTx(resolveSig);
-    return { requestSig, resolveSig, parsed, seedBytes, randomPda };
+    return { requestSig, resolveSig, parsed, seedBytes, randomPda, betPda };
   }
+
 
   async function startSpin() {
     if (!connected || !publicKey) {
@@ -343,7 +392,6 @@ export default function SlotMachinePage({
       })(pos);
     }
 
-    // compute multiplier according to symbols and set x
     const multiplier = getMultiplier(parsed.s0, parsed.s1, parsed.s2) || 0;
     setX(multiplier);
 
@@ -355,7 +403,6 @@ export default function SlotMachinePage({
 
       if (payoutLamports > 0) {
         const multFromPayout = betLamports > 0 ? (payoutLamports / betLamports) : 0;
-        // choose big win threshold same as before
         if (multFromPayout >= 50 || multiplier >= 50) setShowOverlayBigWin(true);
         else setShowOverlayWin(true);
 
@@ -369,10 +416,10 @@ export default function SlotMachinePage({
     }, finishDelay);
   }
 
-  useEffect(() => { if (showOverlayWin) { const t = setTimeout(() => setShowOverlayWin(false), 3500); return () => clearTimeout(t); } }, [showOverlayWin]);
-  useEffect(() => { if (showOverlayLoss) { const t = setTimeout(() => setShowOverlayLoss(false), 3000); return () => clearTimeout(t); } }, [showOverlayLoss]);
-  useEffect(() => { if (showOverlayBigWin) { const t = setTimeout(() => setShowOverlayBigWin(false), 4500); return () => clearTimeout(t); } }, [showOverlayBigWin]);
-  useEffect(() => { if (showOverlayNoMoney) { const t = setTimeout(() => setShowOverlayNoMoney(false), 3000); return () => clearTimeout(t); } }, [showOverlayNoMoney]);
+  // useEffect(() => { if (showOverlayWin) { const t = setTimeout(() => setShowOverlayWin(false), 3500); return () => clearTimeout(t); } }, [showOverlayWin]);
+  // useEffect(() => { if (showOverlayLoss) { const t = setTimeout(() => setShowOverlayLoss(false), 3000); return () => clearTimeout(t); } }, [showOverlayLoss]);
+  // useEffect(() => { if (showOverlayBigWin) { const t = setTimeout(() => setShowOverlayBigWin(false), 4500); return () => clearTimeout(t); } }, [showOverlayBigWin]);
+  // useEffect(() => { if (showOverlayNoMoney) { const t = setTimeout(() => setShowOverlayNoMoney(false), 3000); return () => clearTimeout(t); } }, [showOverlayNoMoney]);
 
   useEffect(() => {
     let mounted = true;
@@ -393,13 +440,11 @@ export default function SlotMachinePage({
 
   const normImages = images.map((s) => (typeof s === "string" && !s.startsWith("/") ? "/" + s : s));
 
-  // helper to format lamports -> SOL to N decimals
   const lamportsToSol = (lamports, decimals = 9) => {
     const sol = Number(lamports) / LAMPORTS_PER_SOL;
     return sol.toFixed(decimals);
   };
 
-  // compute cash amounts for overlays (safe)
   const payoutLamports = Number(result?.payoutNetLamports || "0");
   const payoutSol = payoutLamports / LAMPORTS_PER_SOL;
   const betVal = parseFloat(multValue) || 0;
@@ -451,11 +496,9 @@ export default function SlotMachinePage({
           </div>
         </div>
 
-        {/* Overlays (videos) */}
         {showOverlayWin && (
           <div style={{ position: "fixed", top:0, left:0, width:"100%", height:"100%", backgroundColor:"rgba(0,0,0,0.6)", display:"flex", justifyContent:"center", alignItems:"center", zIndex:9999, flexDirection:"column" }}>
             <div style={{ position:"absolute", top:20, color:"#fff", fontSize:65, fontWeight:700, textAlign:"center", width:"100%", fontFamily:'MyFont' }}>
-              {/* показываем чистый выигрыш (payout - stake), общую выплату и множитель */}
               Выигрыш (чистыми): {netProfitSol.toFixed(9)} SOL — Выплата: {payoutSol.toFixed(9)} SOL; кф = {multiplierDisplay}x
             </div>
 
@@ -487,7 +530,6 @@ export default function SlotMachinePage({
           </div>
         )}
 
-        {/* Result / Logs */}
         <div style={{ marginTop: 16 }}>
           <h4 style={{ color: "#000" }}>Result</h4>
           {result ? (

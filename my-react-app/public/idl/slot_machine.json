@@ -103,9 +103,104 @@
       ]
     },
     {
+      "name": "place_bet",
+      "docs": [
+        "NEW: place_bet — игрок переводит ставку в vault и создаётся Bet PDA,",
+        "который связывает ставку с randomness_account (seed-derived PDA)."
+      ],
+      "discriminator": [
+        222,
+        62,
+        67,
+        220,
+        63,
+        166,
+        126,
+        33
+      ],
+      "accounts": [
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "randomness_account",
+          "docs": [
+            "We only use its pubkey to derive Bet PDA; randomness account itself will be created/owned by ORAO via CPI."
+          ]
+        },
+        {
+          "name": "bet",
+          "docs": [
+            "Bet PDA linked to randomness_account"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "randomness_account"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "docs": [
+            "Vault PDA where bets are stored"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  101,
+                  103,
+                  111,
+                  114,
+                  52,
+                  53,
+                  54,
+                  95,
+                  118,
+                  51
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "bet_amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "request_vrf",
       "docs": [
-        "Шаг 1: игрок запрашивает randomness у ORAO"
+        "Шаг 1: игрок запрашивает randomness у ORAO (как раньше)"
       ],
       "discriminator": [
         5,
@@ -125,6 +220,9 @@
         },
         {
           "name": "randomness_account",
+          "docs": [
+            "We don't validate it here because CPI creates/initializes it."
+          ],
           "writable": true
         },
         {
@@ -162,7 +260,8 @@
     {
       "name": "resolve_bet",
       "docs": [
-        "Шаг 2: после того, как randomness выполнен (fulfill), игрок вызывает эту инструкцию, чтобы сыграть слот"
+        "Шаг 2: после того, как randomness выполнен (fulfill), игрок вызывает эту инструкцию, чтобы сыграть слот",
+        "Теперь resolve_bet использует привязанный Bet PDA (созданный в place_bet)."
       ],
       "discriminator": [
         137,
@@ -182,7 +281,33 @@
         },
         {
           "name": "randomness_account",
+          "docs": [
+            "We validate the content by deserializing RandomnessAccountData and by checking that the Bet PDA references this randomness_account."
+          ],
           "writable": true
+        },
+        {
+          "name": "bet",
+          "docs": [
+            "Bet PDA that must match randomness_account"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "randomness_account"
+              }
+            ]
+          }
         },
         {
           "name": "vault",
@@ -250,15 +375,23 @@
           "address": "11111111111111111111111111111111"
         }
       ],
-      "args": [
-        {
-          "name": "bet_amount",
-          "type": "u64"
-        }
-      ]
+      "args": []
     }
   ],
   "accounts": [
+    {
+      "name": "Bet",
+      "discriminator": [
+        147,
+        23,
+        35,
+        59,
+        15,
+        75,
+        155,
+        32
+      ]
+    },
     {
       "name": "Treasury",
       "discriminator": [
@@ -331,9 +464,50 @@
       "code": 6005,
       "name": "RandomnessNotFulfilled",
       "msg": "Randomness not fulfilled yet"
+    },
+    {
+      "code": 6006,
+      "name": "BetAlreadyUsed",
+      "msg": "Bet already used"
+    },
+    {
+      "code": 6007,
+      "name": "UnauthorizedPlayer",
+      "msg": "Unauthorized player for this bet"
     }
   ],
   "types": [
+    {
+      "name": "Bet",
+      "docs": [
+        "New: Bet account stores placed bet and link to randomness_account"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "bet_amount",
+            "type": "u64"
+          },
+          {
+            "name": "randomness_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "used",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
     {
       "name": "SpinResult",
       "type": {

@@ -20,7 +20,7 @@ export default function Header() {
 
     audioEl.loop = true;
     audioEl.volume = 0.5;
-    audioEl.muted = true; // стартуем muted, чтобы автоплей был разрешён
+    audioEl.muted = true; 
 
     try {
       const playResult = audioEl.play();
@@ -92,7 +92,7 @@ export default function Header() {
         justifyContent: "space-between",
         alignItems: "center",
         borderRadius: "5px",
-        position: "sticky",   // чтобы не накрывался контентом
+        position: "sticky",   
         top: 0,
         zIndex: 2000,
         background: "transparent",
