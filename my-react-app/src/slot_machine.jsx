@@ -13,29 +13,16 @@ import * as anchor from "@coral-xyz/anchor";
 import { AnchorProvider } from "@coral-xyz/anchor";
 import { Orao, randomnessAccountAddress, networkStateAccountAddress } from "@orao-network/solana-vrf";
 
-
 const CLUSTER = "devnet";
 const RPC = clusterApiUrl(CLUSTER);
 const PROGRAM_ID = new PublicKey("6zSFSUhQ3qdFDXzqfTxg674pkF7JBoqbm6BmbGmc6DZ4");
 const VAULT_SEED = "vault_egor456_v3";
 const TREASURY_SEED = "treasury_egor456_v3";
 
+// AGENT backend URL (local)
+const AGENT_BASE = process.env.REACT_APP_AGENT_BASE || "http://localhost:3001";
 
-export default function SlotMachinePage({
-  images = [
-    "/images/abdul.jpg",
-    "/images/bareckiy.jpg",
-    "/images/jnk.jpg",
-    "/images/ozon.jpg",
-    "/images/the_twins.png",
-    "/images/fnw.jpg",
-  ],
-  audioMap = {
-    win: "/sounds/win.mp3",
-    smallWin: "/sounds/small-win.mp3",
-    lose: "/sounds/lose.mp3",
-  },
-}) {
+export default function SlotMachinePage({ images = ["/images/abdul.jpg","/images/bareckiy.jpg","/images/jnk.jpg","/images/ozon.jpg","/images/the_twins.png","/images/fnw.jpg"], audioMap = { win: "/sounds/win.mp3", smallWin: "/sounds/small-win.mp3", lose: "/sounds/lose.mp3", }, }) {
   const visibleCount = 3;
   const imageSize = 200;
   const changeIntervalMs = 40;
@@ -58,25 +45,17 @@ export default function SlotMachinePage({
   const [balance, setBalance] = useState(null);
   const [result, setResult] = useState(null);
 
-
   const [x, setX] = useState(1.0);
-
 
   const [showOverlayWin, setShowOverlayWin] = useState(false);
   const [showOverlayLoss, setShowOverlayLoss] = useState(false);
   const [showOverlayBigWin, setShowOverlayBigWin] = useState(false);
   const [showOverlayNoMoney, setShowOverlayNoMoney] = useState(false);
 
-  function addLog(s) {
-    setLog((l) => [...l, `[${new Date().toLocaleTimeString()}] ${s}`]);
-  }
+  function addLog(s) { setLog((l) => [...l, `[${new Date().toLocaleTimeString()}] ${s}`]); }
 
   useEffect(() => {
-    audioRefs.current = {
-      win: new Audio(audioMap.win),
-      smallWin: new Audio(audioMap.smallWin),
-      lose: new Audio(audioMap.lose),
-    };
+    audioRefs.current = { win: new Audio(audioMap.win), smallWin: new Audio(audioMap.smallWin), lose: new Audio(audioMap.lose), };
     Object.values(audioRefs.current).forEach((a) => { if (a) a.volume = 0.85; });
   }, [audioMap]);
 
@@ -132,10 +111,7 @@ export default function SlotMachinePage({
       setAnchorProvider(aProvider);
 
       let idl = null;
-      try {
-        const resp = await fetch("/idl/slot_machine.json");
-        if (resp.ok) idl = await resp.json();
-      } catch (e) { /* ignore */ }
+      try { const resp = await fetch("/idl/slot_machine.json"); if (resp.ok) idl = await resp.json(); } catch (e) { /* ignore */ }
 
       try {
         const prog = new anchor.Program(idl || {}, PROGRAM_ID, aProvider);
@@ -212,23 +188,11 @@ export default function SlotMachinePage({
 
   function getMultiplier(s0, s1, s2) {
     if (s0 === s1 && s1 === s2) {
-      switch (s0) {
-        case 0: return 100;
-        case 1: return 6;
-        case 2: return 2;
-        case 3: return 25;
-        default: return 0;
-      }
+      switch (s0) { case 0: return 100; case 1: return 6; case 2: return 2; case 3: return 25; default: return 0; }
     }
     if (s0 === s1 || s0 === s2 || s1 === s2) {
       const sym = (s0 === s1) ? s0 : (s0 === s2 ? s0 : s1);
-      switch (sym) {
-        case 0: return 10;
-        case 1: return 2;
-        case 2: return 1;
-        case 3: return 5;
-        default: return 0;
-      }
+      switch (sym) { case 0: return 10; case 1: return 2; case 2: return 1; case 3: return 5; default: return 0; }
     }
     return 0;
   }
@@ -279,7 +243,7 @@ export default function SlotMachinePage({
 
     let requestSig;
     try {
-      addLog("Sending request_vrf");
+      addLog("Sending request_vrf (signed by player) — player pays ORAO fees");
       requestSig = await program.methods
         .requestVrf([...seedBytes])
         .accounts({
@@ -304,29 +268,34 @@ export default function SlotMachinePage({
       throw new Error("waitFulfilled failed: " + (e?.message || e?.toString()));
     }
 
+    // --- NEW: resolve via agent backend ---
     let resolveSig;
     try {
-      addLog("Sending resolve_bet");
-      resolveSig = await program.methods
-        .resolveBet() 
-        .accounts({
-          player: payer,
-          randomnessAccount: randomPda,
-          bet: betPda,
-          vault: vaultPda,
-          treasury: treasuryPda,
-          systemProgram: SystemProgram.programId,
-        })
-        .rpc();
-      addLog("resolve_bet tx: " + resolveSig);
+      addLog("Requesting agent to send resolve_bet (agent will sign) ...");
+      const resp = await fetch(`${AGENT_BASE}/agent/resolve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          playerPubkey: payer.toBase58(),
+          randomPda: randomPda.toBase58(),
+          betPda: betPda.toBase58(),
+          vaultPda: vaultPda.toBase58(),
+          treasuryPda: treasuryPda.toBase58(),
+          // configPda: derive your config PDA here (must match program)
+          configPda: (await PublicKey.findProgramAddress([Buffer.from("config_agent_v2")], PROGRAM_ID))[0].toBase58()
+        }),
+      });
+      const j = await resp.json();
+      if (!j.ok) throw new Error("Agent error: " + (j.error || JSON.stringify(j)));
+      resolveSig = j.txSig;
+      addLog("agent resolve tx: " + resolveSig);
     } catch (e) {
-      throw new Error("resolve_bet failed: " + (e?.message || e?.toString()));
+      throw new Error("resolve_bet (via agent) failed: " + (e?.message || e?.toString()));
     }
 
     const parsed = await parseSlotResultFromTx(resolveSig);
     return { requestSig, resolveSig, parsed, seedBytes, randomPda, betPda };
   }
-
 
   async function startSpin() {
     if (!connected || !publicKey) {
@@ -416,11 +385,6 @@ export default function SlotMachinePage({
     }, finishDelay);
   }
 
-  // useEffect(() => { if (showOverlayWin) { const t = setTimeout(() => setShowOverlayWin(false), 3500); return () => clearTimeout(t); } }, [showOverlayWin]);
-  // useEffect(() => { if (showOverlayLoss) { const t = setTimeout(() => setShowOverlayLoss(false), 3000); return () => clearTimeout(t); } }, [showOverlayLoss]);
-  // useEffect(() => { if (showOverlayBigWin) { const t = setTimeout(() => setShowOverlayBigWin(false), 4500); return () => clearTimeout(t); } }, [showOverlayBigWin]);
-  // useEffect(() => { if (showOverlayNoMoney) { const t = setTimeout(() => setShowOverlayNoMoney(false), 3000); return () => clearTimeout(t); } }, [showOverlayNoMoney]);
-
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -454,22 +418,15 @@ export default function SlotMachinePage({
   const multiplierDisplay = betLamports > 0 ? (payoutLamports / betLamports) : x;
 
   return (
-    <div style={{ marginTop: 8, padding: 20, fontFamily: "Arial, sans-serif" }}>
+ <div style={{ marginTop: 8, padding: 20, fontFamily: "Arial, sans-serif" }}>
       <div style={{ background: "white", borderRadius: 12, padding: 20 }}>
         <h3 style={{ textAlign: "center", fontFamily: "MyFont", fontSize: 40 }}>ДЭП МАШИНА (99,999% выйгрыш)</h3>
 
         <div style={{ display: "flex", gap: 16, justifyContent: "center", marginTop: 16 }}>
           {indices.map((idxVal, pos) => (
             <div key={pos} style={{
-              width: imageSize,
-              height: imageSize,
-              borderRadius: 10,
-              overflow: "hidden",
-              background: "rgba(0,0,0,0.05)",
-              boxShadow: spinning ? "0 8px 24px rgba(0,0,0,0.12)" : "none",
-              borderStyle: "outset",
-              borderWidth: "5px",
-              borderColor: "gold",
+              width: imageSize, height: imageSize, borderRadius: 10, overflow: "hidden", background: "rgba(0,0,0,0.05)",
+              boxShadow: spinning ? "0 8px 24px rgba(0,0,0,0.12)" : "none", borderStyle: "outset", borderWidth: "5px", borderColor: "gold",
             }}>
               <img src={normImages[idxVal]} alt={`slot-${pos}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e)=>{e.currentTarget.style.opacity="0.35"}} />
             </div>
@@ -478,12 +435,8 @@ export default function SlotMachinePage({
 
         <div style={{ display: "flex", justifyContent: "center", alignItems: "center", marginTop: 20 }}>
           <button onClick={startSpin} disabled={spinning || !multValue} style={{
-            padding: "8px 14px",
-            borderRadius: 8,
-            background: spinning ? "#374151" : "linear-gradient(270deg, #FFD700, #FFA500, #FFD700)",
-            color: "#fff",
-            fontWeight: 600,
-            fontFamily: 'MyFont'
+            padding: "8px 14px", borderRadius: 8, background: spinning ? "#374151" : "linear-gradient(270deg, #FFD700, #FFA500, #FFD700)",
+            color: "#fff", fontWeight: 600, fontFamily: 'MyFont'
           }}>
             {spinning ? "Лудим…" : "Дэп"}
           </button>
