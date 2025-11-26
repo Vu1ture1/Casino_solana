@@ -241,23 +241,30 @@ export default function SlotMachinePage({ images = ["/images/abdul.jpg","/images
       throw new Error("place_bet failed: " + (e?.message || e?.toString()));
     }
 
+    // --- NEW: ask agent to call request_vrf (agent will sign & pay ORAO fees)
     let requestSig;
     try {
-      addLog("Sending request_vrf (signed by player) — player pays ORAO fees");
-      requestSig = await program.methods
-        .requestVrf([...seedBytes])
-        .accounts({
-          player: payer,
-          randomnessAccount: randomPda,
-          networkState: networkStatePda,
-          vrfTreasury: netState.config.treasury,
-          vrfProgram: vrfSdk.programId,
-          systemProgram: SystemProgram.programId,
-        })
-        .rpc();
-      addLog("request_vrf tx: " + requestSig);
+      addLog("Requesting agent to send request_vrf (agent will sign & pay ORAO fees) ...");
+
+      const resp = await fetch(`${AGENT_BASE}/agent/request`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          seedPubkey: forceKeypair.publicKey.toBase58(), // agent will convert to bytes
+          randomPda: randomPda.toBase58(),
+          networkState: networkStatePda.toBase58(),
+          vrfTreasury: netState.config.treasury.toBase58(),
+          vrfProgram: vrfSdk.programId.toBase58(),
+          configPda: (await PublicKey.findProgramAddress([Buffer.from("config_agent_v2")], PROGRAM_ID))[0].toBase58()
+        }),
+      });
+
+      const j = await resp.json();
+      if (!j.ok) throw new Error("Agent request error: " + (j.error || JSON.stringify(j)));
+      requestSig = j.txSig;
+      addLog("agent request_vrf tx: " + requestSig);
     } catch (e) {
-      throw new Error("request_vrf failed: " + (e?.message || e?.toString()));
+      throw new Error("request_vrf (via agent) failed: " + (e?.message || e?.toString()));
     }
 
     try {

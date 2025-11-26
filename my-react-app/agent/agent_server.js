@@ -7,7 +7,7 @@ const fs = require("fs");
 const path = require("path");
 const cors = require("cors");
 const anchor = require("@coral-xyz/anchor");
-const { Keypair, Connection, clusterApiUrl, PublicKey } = require("@solana/web3.js");
+const { Keypair, Connection, clusterApiUrl, PublicKey, SystemProgram } = require("@solana/web3.js");
 
 const PORT = process.env.AGENT_PORT ? Number(process.env.AGENT_PORT) : 3001;
 const CLUSTER = process.env.CLUSTER || "devnet";
@@ -55,7 +55,6 @@ const walletForAnchor = {
       tx.recentBlockhash = blockhash;
     }
     tx.feePayer = tx.feePayer || agentKeypair.publicKey;
-    // partialSign is fine for local keypair
     tx.partialSign(agentKeypair);
     return tx;
   },
@@ -70,33 +69,83 @@ const walletForAnchor = {
   },
 };
 
-// use anchor.AnchorProvider (not undefined)
 const provider = new anchor.AnchorProvider(connection, walletForAnchor, anchor.AnchorProvider.defaultOptions());
 anchor.setProvider(provider);
 
-// create program with (idl, programId, provider)
+// Program object bound to agent provider (agent will sign txs)
 const program = new anchor.Program(idl, provider);
 
 const app = express();
-app.use(cors()); // allow cross-origin requests from the browser
+app.use(cors());
 app.use(bodyParser.json({ limit: "1mb" }));
 
 app.get("/", (req, res) => res.send("Agent alive. public key: " + agentKeypair.publicKey.toBase58()));
 app.get("/health", (req, res) => res.json({ ok: true, pubkey: agentKeypair.publicKey.toBase58() }));
 
 /**
- * POST /agent/resolve
+ * POST /agent/request
  * body:
  * {
- *   "playerPubkey": "<player base58>",
+ *   "seedPubkey": "<32-byte seed publickey base58> (forceKeypair.publicKey.toBase58())",
  *   "randomPda": "<randomness account base58>",
- *   "betPda": "<bet pda base58>",
- *   "vaultPda": "<vault pda base58>",
- *   "treasuryPda": "<treasury pda base58>",
- *   "configPda": "<config pda base58>"
+ *   "networkState": "<network_state PDA base58>",
+ *   "vrfTreasury": "<ORAO treasury pubkey base58>",
+ *   "vrfProgram": "<ORAO program id base58>",
+ *   "configPda": "<config PDA base58>"
  * }
  *
  * Response: { ok: true, txSig: "..." }
+ *
+ * NOTE: This endpoint makes the program call that CPI's into ORAO; agent will pay ORAO fees.
+ */
+app.post("/agent/request", async (req, res) => {
+  try {
+    const body = req.body || {};
+    const required = ["seedPubkey", "randomPda", "networkState", "vrfTreasury", "vrfProgram", "configPda"];
+    for (const k of required) {
+      if (!body[k]) return res.status(400).json({ ok: false, error: `missing ${k}` });
+    }
+
+    // parse inputs
+    const seedPubkey = new PublicKey(body.seedPubkey);
+    const randomnessAccount = new PublicKey(body.randomPda);
+    const networkState = new PublicKey(body.networkState);
+    const vrfTreasury = new PublicKey(body.vrfTreasury);
+    const vrfProgram = new PublicKey(body.vrfProgram);
+    const config = new PublicKey(body.configPda);
+
+    // seed bytes array for Anchor call – program-side expects [u8;32]
+    const seedBytes = [...seedPubkey.toBuffer()]; // array of 32 numbers
+
+    console.log("Agent: sending request_vrf (operator) for seed", seedPubkey.toBase58(), "randomPda", randomnessAccount.toBase58());
+
+    // NOTE: your Rust program must expose an instruction that allows operator to call request_vrf (e.g. request_vrf_agent)
+    // The method name below should match the instruction name in Anchor-generated IDL.
+    // Try requestVrfAgent / requestVrfAgentV2 as appropriate (case/anchor mapping).
+    const txSig = await program.methods
+      .requestVrfAgent(seedBytes) // <--- must match IDL: request_vrf_agent -> requestVrfAgent
+      .accounts({
+        operator: agentKeypair.publicKey,
+        randomnessAccount: randomnessAccount,
+        networkState: networkState,
+        vrfTreasury: vrfTreasury,
+        vrfProgram: vrfProgram,
+        config: config,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    console.log("request_vrf_agent tx:", txSig);
+    return res.json({ ok: true, txSig });
+  } catch (e) {
+    console.error("agent request error:", e);
+    return res.status(500).json({ ok: false, error: String(e), logs: e?.logs ?? null });
+  }
+});
+
+/**
+ * POST /agent/resolve
+ * body: same as before
  */
 app.post("/agent/resolve", async (req, res) => {
   try {
@@ -115,7 +164,6 @@ app.post("/agent/resolve", async (req, res) => {
 
     console.log("Agent: sending resolve_bet for player", player.toBase58(), "bet", bet.toBase58());
 
-    // program expects 'operator' to be signer — pass agentKeypair.publicKey and provider will sign
     const txSig = await program.methods
       .resolveBet()
       .accounts({
@@ -134,8 +182,7 @@ app.post("/agent/resolve", async (req, res) => {
     return res.json({ ok: true, txSig });
   } catch (e) {
     console.error("agent resolve error:", e);
-    // try to include more details for debugging
-    return res.status(500).json({ ok: false, error: String(e), details: e?.logs ?? null });
+    return res.status(500).json({ ok: false, error: String(e), logs: e?.logs ?? null });
   }
 });
 

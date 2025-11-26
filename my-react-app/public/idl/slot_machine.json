@@ -188,8 +188,7 @@
     {
       "name": "place_bet",
       "docs": [
-        "NEW: place_bet — игрок переводит ставку в vault и создаётся Bet PDA,",
-        "который связывает ставку с randomness_account (seed-derived PDA)."
+        "place_bet — игрок переводит ставку в vault и создаётся Bet PDA"
       ],
       "discriminator": [
         222,
@@ -208,10 +207,7 @@
           "signer": true
         },
         {
-          "name": "randomness_account",
-          "docs": [
-            "We only use its pubkey to derive Bet PDA; randomness account itself will be created/owned by ORAO via CPI."
-          ]
+          "name": "randomness_account"
         },
         {
           "name": "bet",
@@ -283,7 +279,7 @@
     {
       "name": "request_vrf",
       "docs": [
-        "Шаг 1: игрок запрашивает randomness у ORAO (как раньше)"
+        "STEP: player-paid request_vrf (как раньше) — требует подписи игрока"
       ],
       "discriminator": [
         5,
@@ -303,9 +299,6 @@
         },
         {
           "name": "randomness_account",
-          "docs": [
-            "We don't validate it here because CPI creates/initializes it."
-          ],
           "writable": true
         },
         {
@@ -341,12 +334,74 @@
       ]
     },
     {
+      "name": "request_vrf_agent",
+      "docs": [
+        "NEW: agent-paid request_vrf (operator/agent подписывает и платит)"
+      ],
+      "discriminator": [
+        32,
+        94,
+        101,
+        188,
+        87,
+        85,
+        63,
+        147
+      ],
+      "accounts": [
+        {
+          "name": "operator",
+          "docs": [
+            "Operator (agent) who pays for the ORAO request and must be signer"
+          ],
+          "signer": true
+        },
+        {
+          "name": "randomness_account",
+          "writable": true
+        },
+        {
+          "name": "network_state",
+          "writable": true
+        },
+        {
+          "name": "vrf_treasury",
+          "writable": true
+        },
+        {
+          "name": "vrf_program",
+          "docs": [
+            "ORAO VRF Program (CPI target)"
+          ],
+          "address": "VRFzZoJdhFWL8rkvu87LpKM3RbcVezpMEc6X5GVDr7y"
+        },
+        {
+          "name": "config",
+          "docs": [
+            "Config account storing authorized operator pubkey (must match operator)"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "seed",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "resolve_bet",
       "docs": [
-        "Шаг 2: после того, как randomness выполнен (fulfill), игрок или operator вызывает эту инструкцию, чтобы сыграть слот",
-        "Разрешено выполнение, если:",
-        "- вызвавший signer == bet.player (игрок подписал), или",
-        "- вызвавший signer == config.operator (operator/agent), тогда операция выполняется от имени игрока."
+        "resolve_bet — как раньше: игрок или operator может вызвать"
       ],
       "discriminator": [
         137,
@@ -361,16 +416,10 @@
       "accounts": [
         {
           "name": "player",
-          "docs": [
-            "Player: may be signer (if player resolves) or non-signer (if operator resolves)."
-          ],
           "writable": true
         },
         {
           "name": "randomness_account",
-          "docs": [
-            "We validate the content by deserializing RandomnessAccountData and by checking that the Bet PDA references this randomness_account."
-          ],
           "writable": true
         },
         {
@@ -587,14 +636,16 @@
       "code": 6007,
       "name": "UnauthorizedPlayer",
       "msg": "Unauthorized player for this bet"
+    },
+    {
+      "code": 6008,
+      "name": "UnauthorizedOperator",
+      "msg": "Unauthorized operator"
     }
   ],
   "types": [
     {
       "name": "Bet",
-      "docs": [
-        "New: Bet account stores placed bet and link to randomness_account"
-      ],
       "type": {
         "kind": "struct",
         "fields": [
@@ -624,7 +675,7 @@
     {
       "name": "Config",
       "docs": [
-        "Config PDA storing operator key allowed to resolve bets"
+        "Config PDA storing operator key allowed to resolve/pay vrf"
       ],
       "type": {
         "kind": "struct",
