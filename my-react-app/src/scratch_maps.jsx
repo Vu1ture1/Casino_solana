@@ -19,7 +19,7 @@ const CONFIG_AGENT_SEED = "config_agent_scratch_v1";
 const AGENT_BASE = process.env.REACT_APP_AGENT_SCRATCH_BASE || "http://localhost:3002";
 
 // Fixed SOL price (вы просили фиксированный курс)
-const FIXED_SOL_PRICE = 150.0; 
+const FIXED_SOL_PRICE = 141.79; 
 
 export default function ScratchCard3x3({ images = [
     "/images/cases/1_1.jpg",
