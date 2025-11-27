@@ -20,7 +20,7 @@ export default function Header() {
 
     audioEl.loop = true;
     audioEl.volume = 0.5;
-    audioEl.muted = true; 
+    audioEl.muted = true;
 
     try {
       const playResult = audioEl.play();
@@ -87,35 +87,35 @@ export default function Header() {
     <header
       style={{
         color: "#fff",
-        padding: "10px 20px",
+        padding: "14px 20px",
         display: "flex",
         justifyContent: "space-between",
         alignItems: "center",
         borderRadius: "5px",
-        position: "sticky",   
-        top: 0,
+        position: "static",    // <-- был sticky, теперь обычный
         zIndex: 2000,
         background: "transparent",
+        marginBottom: "180px", // <-- большой отступ снизу: подправьте это число (px) при необходимости
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-        <a href="/" style={{ textDecoration: "none", color: "#512DA8", fontFamily: "MyFont", fontSize: "30px", margin: 0 }}>
+        <a href="/" style={{ textDecoration: "none", color: "#fff", fontFamily: "MyFont", fontSize: "30px", margin: 0 }}>
           Атмосферный казик
         </a>
 
-        <a href="/slot" style={{ textDecoration: "none", color: "#512DA8", fontFamily: "MyFont", fontSize: "23px", margin: 0, marginTop: "3.8px" }}>
+        <a href="/slot" style={{ textDecoration: "none", color: "#fff", fontFamily: "MyFont", fontSize: "23px", margin: 0, marginTop: "3.8px" }}>
           Слот машина
         </a>
 
-        <a href="/scratch-maps" style={{ textDecoration: "none", color: "#512DA8", fontFamily: "MyFont", fontSize: "23px", margin: 0, marginTop: "3.8px" }}>
+        <a href="/scratch-maps" style={{ textDecoration: "none", color: "#fff", fontFamily: "MyFont", fontSize: "23px", margin: 0, marginTop: "3.8px" }}>
           Скретч-карты
         </a>
 
-        <a href="/cube" style={{ textDecoration: "none", color: "#512DA8", fontFamily: "MyFont", fontSize: "23px", margin: 0, marginTop: "3.8px" }}>
+        <a href="/cube" style={{ textDecoration: "none", color: "#fff", fontFamily: "MyFont", fontSize: "23px", margin: 0, marginTop: "3.8px" }}>
           Бросок кубика
         </a>
 
-        <a href="/fortune-wheel" style={{ textDecoration: "none", color: "#512DA8", fontFamily: "MyFont", fontSize: "23px", margin: 0, marginTop: "3.8px" }}>
+        <a href="/fortune-wheel" style={{ textDecoration: "none", color: "#fff", fontFamily: "MyFont", fontSize: "23px", margin: 0, marginTop: "3.8px" }}>
           Колесо фортуны
         </a>
       </div>
@@ -131,6 +131,7 @@ export default function Header() {
             borderRadius: "6px",
             fontFamily: 'MyFont',
             margin: 0,
+            color: "#fff", // текст белый внутри бейджа
           }}>
             Баланс: {balance !== null ? Number(balance).toFixed(9) + " SOL" : "Загрузка..."}
           </p>
