@@ -180,6 +180,63 @@ app.post("/agent/resolve", async (req, res) => {
   }
 });
 
+app.post("/agent/refund", async (req, res) => {
+  try {
+    const b = req.body || {};
+    const required = ["playerPubkey", "randomPda", "betPda", "vaultPda", "treasuryPda", "configPda"];
+    for (const k of required) if (!b[k]) return res.json({ ok: false, error: `missing ${k}` });
+
+    const player = new PublicKey(b.playerPubkey);
+    const randomnessAccount = new PublicKey(b.randomPda);
+    const bet = new PublicKey(b.betPda);
+    const vault = new PublicKey(b.vaultPda);
+    const treasury = new PublicKey(b.treasuryPda);
+    const config = new PublicKey(b.configPda);
+
+    console.log(`refund_bet (agent): bet=${bet.toBase58()}, player=${player.toBase58()}`);
+
+    // Prefer the exact IDL name 'refund_bet_from_vault' (snake_case).
+    // Also accept camelCase 'refundBetFromVault' as a fallback.
+    let methodCall = null;
+    if (program.methods && typeof program.methods["refund_bet_from_vault"] === "function") {
+      methodCall = program.methods["refund_bet_from_vault"]();
+    } else if (program.methods && typeof program.methods.refundBetFromVault === "function") {
+      methodCall = program.methods.refundBetFromVault();
+    } else {
+      const idlNameList = (program.idl && Array.isArray(program.idl.instructions)) ? program.idl.instructions.map(i => i.name) : null;
+      console.error("refund_bet_from_vault not found in program.methods. IDL instructions:", idlNameList);
+      return res.json({ ok: false, error: "no refund_bet_from_vault method found in IDL/program.methods" });
+    }
+
+    // call it (no args expected). Use the accounts mapping used by your on-chain instruction.
+    let txSig;
+    try {
+      txSig = await methodCall
+        .accounts({
+          operator: agentKeypair.publicKey,
+          randomnessAccount,
+          bet,
+          vault,
+          treasury,
+          player,
+          config,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .rpc();
+    } catch (callErr) {
+      console.error("refund_bet_from_vault rpc() failed:", callErr && callErr.stack ? callErr.stack : callErr);
+      return res.json({ ok: false, error: "refund rpc failed: " + (callErr?.message || String(callErr)) });
+    }
+
+    const logs = await txLogs(txSig);
+    console.log("refund tx:", txSig);
+    return res.json({ ok: true, txSig, logs });
+  } catch (err) {
+    console.error("refund_bet failed:", err && err.stack ? err.stack : err);
+    return res.json({ ok: false, error: err.message || String(err) });
+  }
+});
+
 app.get("/health", (req, res) => {
   res.json({ ok: true, agent: agentPubkey, program: program.programId?.toBase58?.() ?? null });
 });

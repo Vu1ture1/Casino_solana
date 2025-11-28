@@ -15,7 +15,7 @@ const RPC = process.env.RPC_URL || clusterApiUrl(CLUSTER);
 const PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID || "6zSFSUhQ3qdFDXzqfTxg674pkF7JBoqbm6BmbGmc6DZ4");
 
 // load agent key from AGENT_KEY env
-const agentKeyPath = process.env.AGENT_KEY;
+const agentKeyPath = process.env.AGENT_KEY || path.join(process.cwd(), "agent.json");
 if (!agentKeyPath) {
   console.error("AGENT_KEY env not set. Export AGENT_KEY=/full/path/agent.json");
   process.exit(1);

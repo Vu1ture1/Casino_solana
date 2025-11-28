@@ -1,7 +1,7 @@
 {
-  "address": "9jxkxo2uPSV2XBaPL11MMg2KE3XhaTEq9Dif81UNB6FH",
+  "address": "5CBsiiCU7K9pzNxzmSs7r1sw8UhjsHYWA5srQtm7uDqt",
   "metadata": {
-    "name": "dice_game",
+    "name": "wheel_game",
     "version": "0.1.0",
     "spec": "0.1.0",
     "description": "Created with Anchor"
@@ -26,6 +26,13 @@
           "signer": true
         },
         {
+          "name": "source_config",
+          "docs": [
+            "The existing main config to copy multipliers FROM (must already exist and be owned by program)"
+          ],
+          "writable": true
+        },
+        {
           "name": "config",
           "writable": true,
           "pda": {
@@ -46,10 +53,11 @@
                   110,
                   116,
                   95,
-                  100,
-                  105,
-                  99,
+                  119,
+                  104,
                   101,
+                  101,
+                  108,
                   95,
                   118,
                   50
@@ -97,13 +105,14 @@
                   108,
                   116,
                   95,
-                  100,
-                  105,
-                  99,
+                  119,
+                  104,
                   101,
+                  101,
+                  108,
                   95,
                   118,
-                  50
+                  49
                 ]
               }
             ]
@@ -126,13 +135,14 @@
                   114,
                   121,
                   95,
-                  100,
-                  105,
-                  99,
+                  119,
+                  104,
                   101,
+                  101,
+                  108,
                   95,
                   118,
-                  50
+                  49
                 ]
               }
             ]
@@ -153,13 +163,14 @@
                   105,
                   103,
                   95,
-                  100,
-                  105,
-                  99,
+                  119,
+                  104,
                   101,
+                  101,
+                  108,
                   95,
                   118,
-                  50
+                  49
                 ]
               }
             ]
@@ -175,7 +186,7 @@
     {
       "name": "place_bet",
       "docs": [
-        "PLAYER places bet (player must sign and transfer lamports to vault)"
+        "PLAYER places bet: now no left/right — player just pays and creates Bet PDA linked to randomness_account"
       ],
       "discriminator": [
         222,
@@ -236,13 +247,14 @@
                   108,
                   116,
                   95,
-                  100,
-                  105,
-                  99,
+                  119,
+                  104,
                   101,
+                  101,
+                  108,
                   95,
                   118,
-                  50
+                  49
                 ]
               }
             ]
@@ -257,28 +269,11 @@
         {
           "name": "bet_amount",
           "type": "u64"
-        },
-        {
-          "name": "left",
-          "type": "u8"
-        },
-        {
-          "name": "right",
-          "type": "u8"
-        },
-        {
-          "name": "even",
-          "type": "bool"
         }
       ]
     },
     {
       "name": "refund_bet_from_vault",
-      "docs": [
-        "Refund a bet by taking funds from `vault` (used when agent/VRF failed/timeouts).",
-        "Refund amount = bet_amount + COMPENSATION_LAMPORTS.",
-        "Closes the Bet PDA (close -> vault) to prevent double-refund and decreases vault.reserved by bet_amount."
-      ],
       "discriminator": [
         124,
         124,
@@ -341,13 +336,14 @@
                   108,
                   116,
                   95,
-                  100,
-                  105,
-                  99,
+                  119,
+                  104,
                   101,
+                  101,
+                  108,
                   95,
                   118,
-                  50
+                  49
                 ]
               }
             ]
@@ -388,9 +384,6 @@
       "accounts": [
         {
           "name": "operator",
-          "docs": [
-            "Operator (agent) who pays for the ORAO request and must be signer"
-          ],
           "signer": true
         },
         {
@@ -407,16 +400,10 @@
         },
         {
           "name": "vrf_program",
-          "docs": [
-            "ORAO VRF Program (CPI target)"
-          ],
           "address": "VRFzZoJdhFWL8rkvu87LpKM3RbcVezpMEc6X5GVDr7y"
         },
         {
-          "name": "config",
-          "docs": [
-            "Config account storing authorized operator pubkey (must match operator)"
-          ]
+          "name": "config"
         },
         {
           "name": "system_program",
@@ -437,6 +424,9 @@
     },
     {
       "name": "resolve_bet",
+      "docs": [
+        "RESOLVE: operator reads randomness; payout depends on the number (1..100) directly"
+      ],
       "discriminator": [
         137,
         132,
@@ -450,9 +440,6 @@
       "accounts": [
         {
           "name": "operator",
-          "docs": [
-            "Operator who must sign (only operator allowed to resolve)"
-          ],
           "signer": true
         },
         {
@@ -461,9 +448,6 @@
         },
         {
           "name": "bet",
-          "docs": [
-            "Bet PDA that must match randomness_account"
-          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -496,13 +480,14 @@
                   108,
                   116,
                   95,
-                  100,
-                  105,
-                  99,
+                  119,
+                  104,
                   101,
+                  101,
+                  108,
                   95,
                   118,
-                  50
+                  49
                 ]
               }
             ]
@@ -525,13 +510,14 @@
                   114,
                   121,
                   95,
-                  100,
-                  105,
-                  99,
+                  119,
+                  104,
                   101,
+                  101,
+                  108,
                   95,
                   118,
-                  50
+                  49
                 ]
               }
             ]
@@ -542,10 +528,7 @@
           "writable": true
         },
         {
-          "name": "config",
-          "docs": [
-            "Config account that stores operator pubkey."
-          ]
+          "name": "config"
         },
         {
           "name": "system_program",
@@ -611,19 +594,6 @@
   ],
   "events": [
     {
-      "name": "DiceResult",
-      "discriminator": [
-        208,
-        235,
-        128,
-        235,
-        174,
-        70,
-        45,
-        213
-      ]
-    },
-    {
       "name": "RefundResult",
       "discriminator": [
         218,
@@ -634,6 +604,19 @@
         104,
         180,
         60
+      ]
+    },
+    {
+      "name": "WheelResult",
+      "discriminator": [
+        124,
+        15,
+        68,
+        223,
+        51,
+        118,
+        111,
+        83
       ]
     }
   ],
@@ -692,6 +675,11 @@
       "code": 6010,
       "name": "InvalidRange",
       "msg": "Invalid range"
+    },
+    {
+      "code": 6011,
+      "name": "InvalidBetRange",
+      "msg": "Invalid bet range - must match a configured category"
     }
   ],
   "types": [
@@ -717,18 +705,6 @@
             "type": "bool"
           },
           {
-            "name": "left",
-            "type": "u8"
-          },
-          {
-            "name": "right",
-            "type": "u8"
-          },
-          {
-            "name": "even",
-            "type": "bool"
-          },
-          {
             "name": "bump",
             "type": "u8"
           }
@@ -747,38 +723,15 @@
           {
             "name": "bump",
             "type": "u8"
-          }
-        ]
-      }
-    },
-    {
-      "name": "DiceResult",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "player",
-            "type": "pubkey"
           },
           {
-            "name": "number",
-            "type": "u8"
-          },
-          {
-            "name": "left",
-            "type": "u8"
-          },
-          {
-            "name": "right",
-            "type": "u8"
-          },
-          {
-            "name": "even",
-            "type": "bool"
-          },
-          {
-            "name": "payout_net",
-            "type": "u64"
+            "name": "multiplier_bps",
+            "type": {
+              "array": [
+                "u32",
+                100
+              ]
+            }
           }
         ]
       }
@@ -839,6 +792,30 @@
           {
             "name": "bump",
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "WheelResult",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "number",
+            "type": "u8"
+          },
+          {
+            "name": "multiplier_bps",
+            "type": "u32"
+          },
+          {
+            "name": "payout_net",
+            "type": "u64"
           }
         ]
       }

@@ -8,6 +8,7 @@ import Header from "./header";
 import { SolanaWalletProvider } from "./solana_provider";
 import ScratchCard3x3 from "./scratch_maps";
 import DiceRangeGame from "./cube";
+import WheelGame from "./WheelGame";
 
 
 function App() {
@@ -67,6 +68,14 @@ function App() {
               </div>
             }
           />
+          <Route
+           path="/fortune-wheel"
+           element={
+             <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh", width: "100%" }}>
+               <WheelGame />
+             </div>
+           }
+         />
           <Route path="/" element={<Navigate to="/slot" replace />} />
         </Routes>
       </SolanaWalletProvider>

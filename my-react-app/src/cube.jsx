@@ -45,6 +45,7 @@ export default function DiceRangeGame() {
   const [showOverlayLoss, setShowOverlayLoss] = useState(false);
   const [showOverlayBigWin, setShowOverlayBigWin] = useState(false);
   const [showOverlayNoMoney, setShowOverlayNoMoney] = useState(false);
+  const [showOverlayRefund, setShowOverlayRefund] = useState(false);
 
   // values displayed in overlays
   const [payoutSolDisplay, setPayoutSolDisplay] = useState(0);    // payout to player in SOL
@@ -169,52 +170,74 @@ export default function DiceRangeGame() {
   }
 
   async function parseDiceResultFromTx(connection, txSig, maxAttempts = 12) {
+    const extract = (line) => {
+      if (typeof line !== "string") return null;
+      if (line.includes("DICE_RESULT:")) {
+        const jsonStr = line.slice(line.indexOf("DICE_RESULT:") + "DICE_RESULT:".length).trim();
+        const obj = JSON.parse(jsonStr);
+        return { event: "dice",
+                number: obj.number,
+                left: obj.left,
+                right: obj.right,
+                even: obj.even,
+                payoutNetLamports: BigInt(obj.payout_net || 0),
+                payoutNetSol: Number(BigInt(obj.payout_net || 0)) / LAMPORTS_PER_SOL,
+                raw: obj };
+      }
+      if (line.includes("REFUND_RESULT:")) {
+        const jsonStr = line.slice(line.indexOf("REFUND_RESULT:") + "REFUND_RESULT:".length).trim();
+        const obj = JSON.parse(jsonStr);
+        // obj.bet_amount and obj.compensation expected as numbers (lamports)
+        return { event: "refund",
+                player: obj.player,
+                bet_amount: Number(obj.bet_amount || 0),
+                compensation: Number(obj.compensation || 0),
+                raw: obj };
+      }
+      return null;
+    };
+
     let attempt = 0, waitMs = 300;
     while (attempt < maxAttempts) {
       const tx = await connection.getTransaction(txSig, { commitment: "finalized" });
       if (tx && tx.meta && Array.isArray(tx.meta.logMessages)) {
         for (const line of tx.meta.logMessages) {
-          if (typeof line !== "string") continue;
-          const idx = line.indexOf("DICE_RESULT:");
-          if (idx !== -1) {
-            const jsonStr = line.slice(idx + "DICE_RESULT:".length).trim();
-            const obj = JSON.parse(jsonStr);
-            return {
-              number: obj.number,
-              left: obj.left,
-              right: obj.right,
-              even: obj.even,
-              payoutNetLamports: BigInt(obj.payout_net || 0),
-              payoutNetSol: Number(BigInt(obj.payout_net || 0)) / LAMPORTS_PER_SOL,
-              raw: obj
-            };
-          }
+          const r = extract(line);
+          if (r) return r;
         }
-        throw new Error("DICE_RESULT not found in transaction logs");
+        throw new Error("DICE_RESULT/REFUND_RESULT not found in transaction logs");
       }
       await new Promise((r)=>setTimeout(r, waitMs));
       attempt += 1; waitMs = Math.min(1500, Math.floor(waitMs * 1.5));
     }
+
     const txFinal = await new Connection(RPC, "confirmed").getTransaction(txSig, { commitment: "confirmed" });
     if (txFinal && txFinal.meta && Array.isArray(txFinal.meta.logMessages)) {
       for (const line of txFinal.meta.logMessages) {
-        if (typeof line !== "string") continue;
-        const idx = line.indexOf("DICE_RESULT:");
-        if (idx !== -1) {
-          const obj = JSON.parse(line.slice(idx + "DICE_RESULT:".length).trim());
-          return {
-            number: obj.number,
-            left: obj.left,
-            right: obj.right,
-            even: obj.even,
-            payoutNetLamports: BigInt(obj.payout_net || 0),
-            payoutNetSol: Number(BigInt(obj.payout_net || 0)) / LAMPORTS_PER_SOL,
-            raw: obj
-          };
-        }
+        const r = extract(line);
+        if (r) return r;
       }
     }
+
     throw new Error("No transaction meta/logs available after retries");
+  }
+
+  async function waitForTxConfirmed(connection, sig, timeoutMs = 90_000) {
+    addLog("Waiting for tx confirmation: " + sig);
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      try {
+        const tx = await connection.getTransaction(sig, { commitment: "confirmed" });
+        if (tx && tx.meta) {
+          addLog("Transaction confirmed: " + sig);
+          return tx;
+        }
+      } catch (e) {
+        // ignore transient RPC errors
+      }
+      await new Promise((r) => setTimeout(r, 700));
+    }
+    throw new Error("Timeout waiting for tx confirmation: " + sig);
   }
 
   // Manual polling fallback
@@ -353,21 +376,106 @@ export default function DiceRangeGame() {
       return;
     }
 
-    // wait for ORAO fulfillment
-    addLog("Waiting ORAO fulfillment (another path) ...");
+    // --- after agent.request returned requestSig ---
+    addLog("agent.request tx: " + requestSig);
+
+    // wait for agent tx to confirm (so randomness account is actually created)
     try {
-      await vrfSdk.waitFulfilled(seedBytes);
-      addLog("vrf.waitFulfilled another path success");
+      await waitForTxConfirmed(connection, requestSig, 90_000); // 90s
+    } catch (e) {
+      addLog("request tx did not confirm in time: " + (e?.message || e), "error");
+      // we continue — fallback poll will catch account when created, but warn user
+    }
+
+    // Now try the fast path: vrf.waitFulfilled but with a short timeout
+    addLog("Waiting ORAO fulfillment (fast path using vrf.waitFulfilled) ...");
+    try {
+      const waitFulfilledPromise = vrfSdk.waitFulfilled(seedBytes);
+      const timeoutPromise = new Promise((_, rej) => setTimeout(() => rej(new Error("vrf.waitFulfilled timeout (fast path)")), 20_000)); 
+      await Promise.race([waitFulfilledPromise, timeoutPromise]);
+      addLog("vrf.waitFulfilled fast path success");
     } catch (fastErr) {
-      addLog("Another path failed: " + (fastErr?.message || fastErr) + " - falling back to manual fetch");
+      addLog("Fast path failed or timed out: " + (fastErr?.message || fastErr) + " — falling back to robust polling", "info");
+      // robust polling will check account existence + vrf.getRandomness() repeatedly
       try {
-        await waitForRandomnessFulfilledRobust(vrfSdk, connection, seedBytes, randomPda, { pollIntervalMs: 700, timeoutMs: 120000 });
+        await waitForRandomnessFulfilledRobust(vrfSdk, connection, seedBytes, randomPda, { pollIntervalMs: 700, timeoutMs: 20_000 });
         addLog("Robust polling: ORAO fulfilled");
       } catch (pollErr) {
-        console.error("waitForRandomnessFulfilled failed:", pollErr);
-        addLog("waitForRandomnessFulfilled failed: " + (pollErr?.message || pollErr), "error");
-        setWorking(false);
-        alert("Не дождались ORAO randomness: " + (pollErr?.message || pollErr?.toString()));
+        addLog("waitForRandomnessFulfilledRobust failed: " + (pollErr?.message || pollErr), "error");
+        // === NEW: try to request refund via agent (fallback) ===
+        addLog("Попытка инициировать возврат (refund) через агента ...");
+        try {
+          // build payload for agent refund endpoint
+          const refundPayload = {
+            playerPubkey: publicKey.toBase58(),
+            randomPda: randomPda.toBase58(),
+            betPda: betPda.toBase58(),
+            vaultPda: vaultPda.toBase58(),
+            treasuryPda: treasuryPda.toBase58(),
+            configPda: (await PublicKey.findProgramAddress([Buffer.from("config_agent_dice_v2")], PROGRAM_ID))[0].toBase58(),
+          };
+          addLog("Calling agent /agent/refund ...");
+          const refundResp = await fetch(`${AGENT_BASE}/agent/refund`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(refundPayload),
+          });
+
+          let refundJson;
+          try { refundJson = await refundResp.json(); } catch (e) { throw new Error("agent refund returned non-json or network error"); }
+          if (!refundJson.ok) {
+            addLog("Agent /refund returned failure: " + (refundJson.error || JSON.stringify(refundJson)), "error");
+            throw new Error("Agent refund failure: " + (refundJson.error || "unknown"));
+          }
+
+          const refundTxSig = refundJson.txSig;
+          addLog("agent.refund tx: " + refundTxSig);
+
+          // wait for refund tx to be confirmed (use existing helper)
+          try {
+            await waitForTxConfirmed(connection, refundTxSig, 30_000);
+            addLog("Refund tx confirmed: " + refundTxSig);
+          } catch (e) {
+            addLog("Refund tx did not confirm in time: " + (e?.message || e), "error");
+            throw e;
+          }
+
+          // parse logs for REFUND_RESULT (re-use existing parser)
+          try {
+            const parsedRefund = await parseDiceResultFromTx(connection, refundTxSig);
+            if (parsedRefund.event === "refund") {
+              addLog("REFUND_RESULT received via tx: bet_amount=" + parsedRefund.bet_amount + ", compensation=" + parsedRefund.compensation);
+              // reuse your UI handling path for refund — set overlay fields:
+              const betAmountLam = BigInt(parsedRefund.bet_amount || 0);
+              const compLam = BigInt(parsedRefund.compensation || 0);
+              const refundTotalLam = betAmountLam + compLam;
+              const refundTotalSol = Number(refundTotalLam) / LAMPORTS_PER_SOL;
+              const betSolLocal = parseBet();
+
+              setPayoutSolDisplay(refundTotalSol);
+              const netProfit = refundTotalSol - betSolLocal;
+              setNetProfitSolDisplay(netProfit);
+              setMultiplierDisplay(betSolLocal > 0 ? (refundTotalSol / betSolLocal).toFixed(2) : "0.00");
+
+              setResult("refund");
+              setShowOverlayRefund(true);
+            } else {
+              addLog("Refund tx did not contain REFUND_RESULT event (got " + parsedRefund.event + ")", "error");
+              alert("Refund transaction executed but REFUND_RESULT not found in logs. Проверьте транзакцию: " + refundTxSig);
+            }
+          } catch (e) {
+            addLog("Failed to parse refund tx logs: " + (e?.message || e), "error");
+            alert("Не удалось распарсить возвратную транзакцию. Проверьте в explorer: " + refundTxSig);
+          }
+        } catch (refundErr) {
+          console.error("agent.refund failed:", refundErr);
+          addLog("agent.refund failed: " + (refundErr?.message || refundErr), "error");
+          // last-resort: notify user
+          alert("Не дождались ORAO randomness и возврат через агента не удался: " + (refundErr?.message || refundErr).toString());
+        } finally {
+          setWorking(false);
+        }
+        // stop normal flow after refund attempt
         return;
       }
     }
@@ -407,42 +515,82 @@ export default function DiceRangeGame() {
 
     // parse result + overlay handling
     let parsed;
+    // parse result
     try {
-      parsed = await parseDiceResultFromTx(connection, resolveSig);
+       parsed = await parseDiceResultFromTx(connection, resolveSig);
 
-      // update UI
-      setFinalRoll(parsed.number);
-      setDisplayValue(parsed.number);
-      setResult(parsed.payoutNetLamports > 0n ? "win" : "lose");
-      setWinAmount(Number(parsed.payoutNetLamports) / LAMPORTS_PER_SOL);
-      setX(((Number(parsed.payoutNetLamports) / betLamports) || 0).toFixed(2));
-      addLog("Parsed DICE_RESULT: number=" + parsed.number + " payout_net=" + parsed.payoutNetLamports.toString());
+         // ======= DEBUG: временный форс рефанда для тестирования =======
+  // const FORCE_REFUND_TEST = true; // <- поставьте true чтобы протестировать, false чтобы вернуть нормальное поведение
+  // if (FORCE_REFUND_TEST) {
+  //   addLog("DEBUG: forcing REFUND_RESULT (test mode)");
+  //   // betLamports уже есть выше в функции
+  //   const COMPENSATION_LAMPORTS = Math.floor(0.00146 * LAMPORTS_PER_SOL); // компенсация в лампортах
+  //   parsed = {
+  //     event: "refund",
+  //     player: publicKey.toBase58(),
+  //     bet_amount: betLamports,      // существующая переменная number (lamports)
+  //     compensation: COMPENSATION_LAMPORTS
+  //   };
+  // } else {
+  //   parsed = await parseDiceResultFromTx(connection, resolveSig);
+  // }
+  // ==============================================================
 
-      // --- overlay handling (use existing betSol from top of function) ---
-      const payoutLam = parsed.payoutNetLamports; // BigInt
-      const payoutSol = Number(payoutLam) / LAMPORTS_PER_SOL;
+      if (parsed.event === "refund") {
+        // refund: bet_amount + compensation are lamports
+        const betAmountLam = BigInt(parsed.bet_amount || 0);
+        const compLam = BigInt(parsed.compensation || 0);
+        const refundTotalLam = betAmountLam + compLam;
+        const refundTotalSol = Number(refundTotalLam) / LAMPORTS_PER_SOL;
+        const betSolLocal = betSol;
 
-      // DO NOT redeclare betSol here — use the one defined earlier in the function
-      // const betSol = betSol  <-- remove this error in your version
+        // set UI values for overlay
+        setPayoutSolDisplay(refundTotalSol); // total returned to player
+        const netProfit = refundTotalSol - betSolLocal;
+        setNetProfitSolDisplay(netProfit);
+        setMultiplierDisplay(betSolLocal > 0 ? (refundTotalSol / betSolLocal).toFixed(2) : "0.00");
 
-      setPayoutSolDisplay(payoutSol);
-      const netProfit = payoutSol - betSol;
-      setNetProfitSolDisplay(netProfit);
+        addLog(`REFUND_RESULT received: bet_amount=${parsed.bet_amount} lamports, compensation=${parsed.compensation} lamports`);
+        // mark UI state
+        setResult("refund");
+        setShowOverlayRefund(true);
 
-      const mult = betSol > 0 ? (payoutSol / betSol) : 0;
-      setMultiplierDisplay(mult.toFixed(2));
+      } else if (parsed.event === "dice") {
+        // standard dice result
+        const payoutNetLam = parsed.payoutNetLamports; // BigInt
+        const payoutNetSol = Number(payoutNetLam) / LAMPORTS_PER_SOL; // net profit (as used previously)
+        const betSolLocal = betSol;
 
-      const number = parsed.number;
-      const inRange = number >= parsed.left && number <= parsed.right;
-      const numberIsEven = (number % 2) === 0;
-      const parityMatched = (parsed.even === numberIsEven);
+        // compute total payout (assuming payout_net is "net" profit)
+        const totalPayoutSol = betSolLocal + payoutNetSol;
 
-      if (inRange && parityMatched && payoutLam > 0n) {
-        setShowOverlayBigWin(true);
-      } else if (payoutLam > 0n) {
-        setShowOverlayWin(true);
+        setFinalRoll(parsed.number);
+        setDisplayValue(parsed.number);
+        setResult(payoutNetLam > 0n ? "win" : "lose");
+        setWinAmount(payoutNetSol);
+        setX(((Number(payoutNetLam) / betLamports) || 0).toFixed(2));
+
+        // prepare overlay fields
+        setPayoutSolDisplay(totalPayoutSol);        // total paid to player (stake + net)
+        setNetProfitSolDisplay(payoutNetSol);       // net profit (may be 0)
+        setMultiplierDisplay(betSolLocal > 0 ? (totalPayoutSol / betSolLocal).toFixed(2) : "0.00");
+
+        addLog("Parsed DICE_RESULT: number=" + parsed.number + " payout_net=" + payoutNetLam.toString());
+        // overlays: big/small win decided below after we compute parity/in-range
+        const number = parsed.number;
+        const inRange = number >= parsed.left && number <= parsed.right;
+        const numberIsEven = (number % 2) === 0;
+        const parityMatched = (parsed.even === numberIsEven);
+
+        if (inRange && parityMatched && payoutNetLam > 0n) {
+          setShowOverlayBigWin(true);
+        } else if (payoutNetLam > 0n) {
+          setShowOverlayWin(true);
+        } else {
+          setShowOverlayLoss(true);
+        }
       } else {
-        setShowOverlayLoss(true);
+        throw new Error("Unknown event type from logs");
       }
 
     } catch (e) {
@@ -631,6 +779,17 @@ export default function DiceRangeGame() {
           <video src="/video/BigWin.mp4" autoPlay style={{ width:"50%", height:"auto", borderRadius:12 }} onEnded={() => { const audio = document.getElementById("bg-audio"); if (audio) audio.volume = 0.6; setShowOverlayBigWin(false); }} />
         </div>
       )}
+
+      {showOverlayRefund && (
+      <div style={{ position: "fixed", top:0, left:0, width:"100%", height:"100%", backgroundColor:"rgba(0,0,0,0.6)", display:"flex", justifyContent:"center", alignItems:"center", zIndex:9999, flexDirection:"column" }}>
+        <div style={{ position:"absolute", top:20, color:"#fff", fontSize:44, fontWeight:700, textAlign:"center", width:"100%", fontFamily:'MyFont' }}>
+          Возврат ставки: {netProfitSolDisplay >= 0 ? "компенсация" : ""} — Чистыми: {netProfitSolDisplay.toFixed(9)} SOL — Выплата: {payoutSolDisplay.toFixed(9)} SOL; кф = {multiplierDisplay}x
+        </div>
+
+        {/* можно заменить видео на ваш файл (или показать статичную картинку) */}
+        <video src="/video/loss3.mp4" autoPlay style={{ width:"50%", height:"auto", borderRadius:12 }} onEnded={() => { setShowOverlayRefund(false); }} />
+      </div>
+    )}
 
       {showOverlayNoMoney && (
         <div style={{ position:"fixed", top:0, left:0, width:"100%", height:"100%", backgroundColor:"rgba(0,0,0,0.6)", display:"flex", justifyContent:"center", alignItems:"center", zIndex:9999 }}>

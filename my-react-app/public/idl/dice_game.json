@@ -273,6 +273,104 @@
       ]
     },
     {
+      "name": "refund_bet_from_vault",
+      "docs": [
+        "Refund a bet by taking funds from `vault` (used when agent/VRF failed/timeouts).",
+        "Refund amount = bet_amount + COMPENSATION_LAMPORTS.",
+        "Closes the Bet PDA (close -> vault) to prevent double-refund and decreases vault.reserved by bet_amount."
+      ],
+      "discriminator": [
+        124,
+        124,
+        133,
+        95,
+        137,
+        188,
+        135,
+        124
+      ],
+      "accounts": [
+        {
+          "name": "operator",
+          "docs": [
+            "Operator who must sign (authorized)"
+          ],
+          "signer": true
+        },
+        {
+          "name": "randomness_account",
+          "writable": true
+        },
+        {
+          "name": "bet",
+          "docs": [
+            "Bet PDA that must match randomness_account; will be closed to vault"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "randomness_account"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "docs": [
+            "Vault PDA where bets and funds are stored"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  100,
+                  105,
+                  99,
+                  101,
+                  95,
+                  118,
+                  50
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "player",
+          "writable": true
+        },
+        {
+          "name": "config",
+          "docs": [
+            "Config account storing operator pubkey"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "request_vrf_agent",
       "docs": [
         "REQUEST VRF by operator (agent-paid)"
@@ -524,6 +622,19 @@
         45,
         213
       ]
+    },
+    {
+      "name": "RefundResult",
+      "discriminator": [
+        218,
+        118,
+        179,
+        247,
+        3,
+        104,
+        180,
+        60
+      ]
     }
   ],
   "errors": [
@@ -667,6 +778,26 @@
           },
           {
             "name": "payout_net",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RefundResult",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "bet_amount",
+            "type": "u64"
+          },
+          {
+            "name": "compensation",
             "type": "u64"
           }
         ]
