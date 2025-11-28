@@ -92,10 +92,10 @@ export default function Header() {
         justifyContent: "space-between",
         alignItems: "center",
         borderRadius: "5px",
-        position: "static",    // <-- был sticky, теперь обычный
+        position: "static",   
         zIndex: 2000,
         background: "transparent",
-        marginBottom: "180px", // <-- большой отступ снизу: подправьте это число (px) при необходимости
+        marginBottom: "180px", 
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
@@ -131,7 +131,7 @@ export default function Header() {
             borderRadius: "6px",
             fontFamily: 'MyFont',
             margin: 0,
-            color: "#fff", // текст белый внутри бейджа
+            color: "#fff", 
           }}>
             Баланс: {balance !== null ? Number(balance).toFixed(9) + " SOL" : "Загрузка..."}
           </p>

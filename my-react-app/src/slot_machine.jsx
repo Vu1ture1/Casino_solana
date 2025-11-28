@@ -19,7 +19,6 @@ const PROGRAM_ID = new PublicKey("6zSFSUhQ3qdFDXzqfTxg674pkF7JBoqbm6BmbGmc6DZ4")
 const VAULT_SEED = "vault_egor456_v3";
 const TREASURY_SEED = "treasury_egor456_v3";
 
-// AGENT backend URL (local)
 const AGENT_BASE = process.env.REACT_APP_AGENT_BASE || "http://localhost:3001";
 
 export default function SlotMachinePage({ images = ["/images/abdul.jpg","/images/bareckiy.jpg","/images/jnk.jpg","/images/ozon.jpg","/images/the_twins.png","/images/fnw.jpg"], audioMap = { win: "/sounds/win.mp3", smallWin: "/sounds/small-win.mp3", lose: "/sounds/lose.mp3", }, }) {
@@ -111,7 +110,7 @@ export default function SlotMachinePage({ images = ["/images/abdul.jpg","/images
       setAnchorProvider(aProvider);
 
       let idl = null;
-      try { const resp = await fetch("/idl/slot_machine.json"); if (resp.ok) idl = await resp.json(); } catch (e) { /* ignore */ }
+      try { const resp = await fetch("/idl/slot_machine.json"); if (resp.ok) idl = await resp.json(); } catch (e) {  }
 
       try {
         const prog = new anchor.Program(idl || {}, PROGRAM_ID, aProvider);
@@ -241,16 +240,15 @@ export default function SlotMachinePage({ images = ["/images/abdul.jpg","/images
       throw new Error("place_bet failed: " + (e?.message || e?.toString()));
     }
 
-    // --- NEW: ask agent to call request_vrf (agent will sign & pay ORAO fees)
     let requestSig;
     try {
-      addLog("Requesting agent to send request_vrf (agent will sign & pay ORAO fees) ...");
+      addLog("Requesting agent to send request_vrf...");
 
       const resp = await fetch(`${AGENT_BASE}/agent/request`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          seedPubkey: forceKeypair.publicKey.toBase58(), // agent will convert to bytes
+          seedPubkey: forceKeypair.publicKey.toBase58(), 
           randomPda: randomPda.toBase58(),
           networkState: networkStatePda.toBase58(),
           vrfTreasury: netState.config.treasury.toBase58(),
@@ -264,7 +262,7 @@ export default function SlotMachinePage({ images = ["/images/abdul.jpg","/images
       requestSig = j.txSig;
       addLog("agent request_vrf tx: " + requestSig);
     } catch (e) {
-      throw new Error("request_vrf (via agent) failed: " + (e?.message || e?.toString()));
+      throw new Error("request_vrf failed: " + (e?.message || e?.toString()));
     }
 
     try {
@@ -275,10 +273,9 @@ export default function SlotMachinePage({ images = ["/images/abdul.jpg","/images
       throw new Error("waitFulfilled failed: " + (e?.message || e?.toString()));
     }
 
-    // --- NEW: resolve via agent backend ---
     let resolveSig;
     try {
-      addLog("Requesting agent to send resolve_bet (agent will sign) ...");
+      addLog("Requesting agent to send resolve_bet...");
       const resp = await fetch(`${AGENT_BASE}/agent/resolve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -288,7 +285,6 @@ export default function SlotMachinePage({ images = ["/images/abdul.jpg","/images
           betPda: betPda.toBase58(),
           vaultPda: vaultPda.toBase58(),
           treasuryPda: treasuryPda.toBase58(),
-          // configPda: derive your config PDA here (must match program)
           configPda: (await PublicKey.findProgramAddress([Buffer.from("config_agent_v2")], PROGRAM_ID))[0].toBase58()
         }),
       });
@@ -459,7 +455,7 @@ export default function SlotMachinePage({ images = ["/images/abdul.jpg","/images
         {showOverlayWin && (
           <div style={{ position: "fixed", top:0, left:0, width:"100%", height:"100%", backgroundColor:"rgba(0,0,0,0.6)", display:"flex", justifyContent:"center", alignItems:"center", zIndex:9999, flexDirection:"column" }}>
             <div style={{ position:"absolute", top:20, color:"#fff", fontSize:65, fontWeight:700, textAlign:"center", width:"100%", fontFamily:'MyFont' }}>
-              Выигрыш (чистыми): {netProfitSol.toFixed(9)} SOL — Выплата: {payoutSol.toFixed(9)} SOL; кф = {multiplierDisplay}x
+              Выигрыш: Выплата: {payoutSol.toFixed(9)} SOL; кф = {multiplierDisplay}x
             </div>
 
             <video src="/video/win.mp4" autoPlay style={{ width:"50%", height:"auto", borderRadius:12 }} onEnded={() => { const audio = document.getElementById("bg-audio"); if (audio) audio.volume = 0.6; setShowOverlayWin(false); }} />
@@ -478,7 +474,7 @@ export default function SlotMachinePage({ images = ["/images/abdul.jpg","/images
         {showOverlayBigWin && (
           <div style={{ position: "fixed", top:0, left:0, width:"100%", height:"100%", backgroundColor:"rgba(0,0,0,0.6)", display:"flex", justifyContent:"center", alignItems:"center", zIndex:9999, flexDirection:"column" }}>
             <div style={{ position:"absolute", top:20, color:"#fff", fontSize:65, fontWeight:700, textAlign:"center", width:"100%", fontFamily:'MyFont' }}>
-              Макс вин!!! Чистыми: {netProfitSol.toFixed(9)} SOL — Выплата: {payoutSol.toFixed(9)} SOL; кф = {multiplierDisplay}x
+              Макс вин!!! Выплата: {payoutSol.toFixed(9)} SOL; кф = {multiplierDisplay}x
             </div>
             <video src="/video/BigWin.mp4" autoPlay style={{ width:"50%", height:"auto", borderRadius:12 }} onEnded={() => { const audio = document.getElementById("bg-audio"); if (audio) audio.volume = 0.6; setShowOverlayBigWin(false); }} />
           </div>
@@ -491,18 +487,18 @@ export default function SlotMachinePage({ images = ["/images/abdul.jpg","/images
         )}
 
         <div style={{ marginTop: 16 }}>
-          <h4 style={{ color: "#000" }}>Result</h4>
+          <h4 style={{ color: "#000" }}>Результат</h4>
           {result ? (
             <div>
-              <div>Symbols: {result.s0} — {result.s1} — {result.s2}</div>
-              <div>Payout: {result.payoutNetLamports} lamports ({result.payoutNetSol.toFixed(9)} SOL)</div>
+              <div>Символы: {result.s0} — {result.s1} — {result.s2}</div>
+              <div>Выплата: ({payoutSol.toFixed(9)} SOL)</div>
               <div>Множитель (client): {getMultiplier(result.s0, result.s1, result.s2)}x</div>
             </div>
-          ) : <div>No result yet</div>}
+          ) : <div>Пока нет результатов</div>}
         </div>
 
         <div style={{ marginTop: 16 }}>
-          <h4 style={{ color: "#000" }}>Logs</h4>
+          <h4 style={{ color: "#000" }}>Логи</h4>
           <div style={{ background: "#111", color: "#fff", padding: 10, height: 220, overflow: "auto" }}>
             {log.map((l, i) => <div key={i} style={{ fontSize: 12 }}>{l}</div>)}
           </div>

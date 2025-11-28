@@ -1,9 +1,3 @@
-// agent_scratch_server.js
-// Usage:
-// export AGENT_KEY=/full/path/agent_scratch.json
-// export AGENT_SCRATCH_PORT=3002
-// export PROGRAM_ID_SCRATCH=<optional program id>
-// node agent_scratch_server.js
 
 const express = require("express");
 const bodyParser = require("body-parser");
@@ -18,7 +12,6 @@ const CLUSTER = process.env.CLUSTER || "devnet";
 const RPC = process.env.RPC_URL || clusterApiUrl(CLUSTER);
 const PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID_SCRATCH || "7fw9uBBxhM4pHMg6TG1wji6xJqZEfDST2HRDwMVHvGTw");
 
-// load agent key from env var
 const agentKeyPath = process.env.AGENT_KEY || path.join(process.cwd(), "agent.json");;
 if (!agentKeyPath) {
   console.error("AGENT_KEY env not set. Export AGENT_KEY=/full/path/agent_scratch.json");
@@ -38,7 +31,6 @@ try {
 const agentKeypair = Keypair.fromSecretKey(Uint8Array.from(secret));
 console.log("Scratch Agent pubkey:", agentKeypair.publicKey.toBase58());
 
-// load IDL (expect scratch_card.json in same folder)
 const idlPath = path.join(__dirname, "scratch_card.json");
 if (!fs.existsSync(idlPath)) {
   console.error("IDL file scratch_card.json not found in agent folder. Copy target/idl/scratch_card.json here.");
@@ -46,10 +38,8 @@ if (!fs.existsSync(idlPath)) {
 }
 const idl = JSON.parse(fs.readFileSync(idlPath, "utf8"));
 
-// connection + anchor provider
 const connection = new Connection(RPC, "confirmed");
 
-// wallet wrapper signs with agent keypair
 const walletForAnchor = {
   publicKey: agentKeypair.publicKey,
   signTransaction: async (tx) => {
@@ -83,10 +73,6 @@ app.use(bodyParser.json({ limit: "1mb" }));
 app.get("/", (req, res) => res.send("Scratch Agent alive. public key: " + agentKeypair.publicKey.toBase58()));
 app.get("/health", (req, res) => res.json({ ok: true, pubkey: agentKeypair.publicKey.toBase58() }));
 
-/**
- * POST /agent/request
- * Body: seedPubkey, randomPda, networkState, vrfTreasury, vrfProgram, configPda
- */
 app.post("/agent/request", async (req, res) => {
   try {
     const body = req.body || {};
@@ -121,9 +107,7 @@ app.post("/agent/request", async (req, res) => {
 
     console.log("request_vrf_agent tx:", txSig);
 
-    // Wait until transaction is confirmed (short loop) before returning to frontend.
-    // This reduces races where frontend immediately tries to read randomness-account.
-    const maxWaitMs = 60_000; // wait up to 60s
+    const maxWaitMs = 60_000; 
     const start = Date.now();
     let confirmed = false;
     while (Date.now() - start < maxWaitMs) {
@@ -133,12 +117,11 @@ app.post("/agent/request", async (req, res) => {
           confirmed = true;
           break;
         }
-      } catch (e) { /* ignore transient */ }
+      } catch (e) {  }
       await new Promise((r) => setTimeout(r, 600));
     }
     if (!confirmed) {
       console.warn("request_vrf_agent: tx did not confirm within timeout:", txSig);
-      // still return txSig but inform caller via logs field
       return res.json({ ok: true, txSig, note: "tx_not_confirmed_within_timeout" });
     }
 
@@ -150,10 +133,6 @@ app.post("/agent/request", async (req, res) => {
   }
 });
 
-/**
- * POST /agent/resolve
- * Body: playerPubkey, randomPda, betPda, vaultPda, treasuryPda, configPda
- */
 app.post("/agent/resolve", async (req, res) => {
   try {
     const body = req.body || {};

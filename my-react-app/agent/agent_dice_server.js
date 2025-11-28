@@ -1,5 +1,3 @@
-// agent/agent_server.js
-// Express agent for request_vrf_agent / resolve_bet with CORS enabled
 const express = require("express");
 const cors = require("cors");
 const fs = require("fs");
@@ -7,15 +5,11 @@ const path = require("path");
 const anchor = require("@coral-xyz/anchor");
 const { Keypair, Connection, clusterApiUrl, PublicKey } = require("@solana/web3.js");
 
-// ---------- CONFIG ----------
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3003;
 const CLUSTER = process.env.CLUSTER || "devnet";
 const RPC = clusterApiUrl(CLUSTER);
 const IDL_PATH = process.env.IDL_PATH || path.join(process.cwd(), "dice_game.json");
 const AGENT_KEY_PATH = process.env.AGENT_KEY || path.join(process.cwd(), "agent.json");
-// Note: we're using `new anchor.Program(idl, agentProvider)` and expecting the IDL to contain the
-// program address metadata (so no programId arg).
-// If your IDL doesn't include address, you can add program address or change to new anchor.Program(idl, programId, provider).
 
 if (!fs.existsSync(IDL_PATH)) {
   console.error("IDL not found at", IDL_PATH);
@@ -26,19 +20,15 @@ if (!fs.existsSync(AGENT_KEY_PATH)) {
   process.exit(1);
 }
 
-// load agent keypair
 const secret = JSON.parse(fs.readFileSync(AGENT_KEY_PATH, "utf8"));
 const agentKeypair = Keypair.fromSecretKey(Uint8Array.from(secret));
 const agentPubkey = agentKeypair.publicKey.toBase58();
 
-// connection & provider for agent
 const connection = new Connection(RPC, "confirmed");
 
-// create a minimal wallet object for Anchor provider that signs with our agent keypair
 const agentWallet = {
   publicKey: agentKeypair.publicKey,
   signTransaction: async (tx) => {
-    // sign locally
     tx.partialSign(agentKeypair);
     return tx;
   },
@@ -50,16 +40,9 @@ const agentWallet = {
 
 const agentProvider = new anchor.AnchorProvider(connection, agentWallet, { preflightCommitment: "confirmed" });
 
-// load IDL and Program (using provider-style constructor as you requested)
 const idl = JSON.parse(fs.readFileSync(IDL_PATH, "utf8"));
-let program;
-try {
-  program = new anchor.Program(idl, agentProvider); // <-- using (idl, provider)
-} catch (e) {
-  console.error("Failed to construct anchor.Program(idl, provider):", e);
-  console.error("If your IDL does not include program address metadata, you may need to call new anchor.Program(idl, programId, provider).");
-  process.exit(1);
-}
+let program = new anchor.Program(idl, agentProvider); 
+
 
 console.log("Agent server");
 console.log(" Agent pubkey:", agentPubkey);
@@ -68,14 +51,11 @@ console.log(" IDL:", IDL_PATH);
 console.log(" Program id (from IDL or program):", program.programId?.toBase58?.() ?? "(unknown)");
 console.log(" Listening on port", PORT);
 
-// ---------- EXPRESS APP ----------
 const app = express();
 
-// allow CORS from any origin (dev). You can restrict to your frontend origin like { origin: 'http://localhost:5173' }
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 
-// helper: fetch tx logs (confirmed)
 async function txLogs(txSig) {
   try {
     const tx = await connection.getTransaction(txSig, { commitment: "confirmed" });
@@ -85,20 +65,16 @@ async function txLogs(txSig) {
   }
 }
 
-// POST /agent/request
-// body: { seedPubkey, randomPda, networkState, vrfTreasury, vrfProgram, configPda }
 app.post("/agent/request", async (req, res) => {
   try {
     const b = req.body || {};
     const required = ["seedPubkey", "randomPda", "networkState", "vrfTreasury", "vrfProgram", "configPda"];
     for (const k of required) if (!b[k]) return res.json({ ok: false, error: `missing ${k}` });
 
-    // convert seedPubkey (frontend sends forceKeypair.publicKey.toBase58())
     let seedBuf;
     try {
-      seedBuf = new PublicKey(b.seedPubkey).toBuffer(); // gives 32-byte Buffer
+      seedBuf = new PublicKey(b.seedPubkey).toBuffer(); 
     } catch (e) {
-      // fallback: if frontend sent base64 or raw, try base64 decode
       try {
         seedBuf = Buffer.from(b.seedPubkey, "base64");
         if (seedBuf.length !== 32) throw new Error("seed length != 32");
@@ -116,7 +92,6 @@ app.post("/agent/request", async (req, res) => {
 
     console.log(`request_vrf_agent: seed=${b.seedPubkey}, randomPda=${randomnessAccount.toBase58()}`);
 
-    // call the program method (agent signs)
     const txSig = await program.methods
       .requestVrfAgent(seedArray)
       .accounts({
@@ -132,7 +107,6 @@ app.post("/agent/request", async (req, res) => {
 
     const logs = await txLogs(txSig);
     console.log("request_vrf_agent tx:", txSig);
-    // include logs in response for diagnostics
     return res.json({ ok: true, txSig, logs });
   } catch (err) {
     console.error("request_vrf_agent failed:", err && err.stack ? err.stack : err);
@@ -140,8 +114,6 @@ app.post("/agent/request", async (req, res) => {
   }
 });
 
-// POST /agent/resolve
-// body: { playerPubkey, randomPda, betPda, vaultPda, treasuryPda, configPda }
 app.post("/agent/resolve", async (req, res) => {
   try {
     const b = req.body || {};
@@ -195,8 +167,6 @@ app.post("/agent/refund", async (req, res) => {
 
     console.log(`refund_bet (agent): bet=${bet.toBase58()}, player=${player.toBase58()}`);
 
-    // Prefer the exact IDL name 'refund_bet_from_vault' (snake_case).
-    // Also accept camelCase 'refundBetFromVault' as a fallback.
     let methodCall = null;
     if (program.methods && typeof program.methods["refund_bet_from_vault"] === "function") {
       methodCall = program.methods["refund_bet_from_vault"]();
@@ -208,7 +178,6 @@ app.post("/agent/refund", async (req, res) => {
       return res.json({ ok: false, error: "no refund_bet_from_vault method found in IDL/program.methods" });
     }
 
-    // call it (no args expected). Use the accounts mapping used by your on-chain instruction.
     let txSig;
     try {
       txSig = await methodCall
@@ -242,5 +211,5 @@ app.get("/health", (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Agent listening: http://localhost:${PORT} (CORS enabled)`);
+  console.log(`Agent listening: http://localhost:${PORT}`);
 });

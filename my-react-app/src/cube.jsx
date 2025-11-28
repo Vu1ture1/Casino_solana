@@ -1,4 +1,3 @@
-// src/components/DiceRangeGame.jsx
 import React, { useEffect, useRef, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import {
@@ -21,7 +20,6 @@ const PROGRAM_ID = new PublicKey(DEFAULT_PROGRAM_ID);
 const AGENT_BASE = process.env.REACT_APP_AGENT_BASE || "http://localhost:3003";
 
 export default function DiceRangeGame() {
-  // UI state (как в вашем прежнем прототипе)
   const [rolling, setRolling] = useState(false);
   const [displayValue, setDisplayValue] = useState(null);
   const [finalRoll, setFinalRoll] = useState(null);
@@ -30,7 +28,6 @@ export default function DiceRangeGame() {
   const [result, setResult] = useState(null);
   const [winAmount, setWinAmount] = useState(0);
 
-  // parity required
   const [parity, setParity] = useState("even");
 
   const { publicKey, connected, wallet } = useWallet();
@@ -40,28 +37,24 @@ export default function DiceRangeGame() {
   const [working, setWorking] = useState(false);
   const [x, setX] = useState(1.5);
 
-  // overlay states for win/loss/bigwin/nomoney
   const [showOverlayWin, setShowOverlayWin] = useState(false);
   const [showOverlayLoss, setShowOverlayLoss] = useState(false);
   const [showOverlayBigWin, setShowOverlayBigWin] = useState(false);
   const [showOverlayNoMoney, setShowOverlayNoMoney] = useState(false);
   const [showOverlayRefund, setShowOverlayRefund] = useState(false);
 
-  // values displayed in overlays
-  const [payoutSolDisplay, setPayoutSolDisplay] = useState(0);    // payout to player in SOL
-  const [netProfitSolDisplay, setNetProfitSolDisplay] = useState(0); // payout - bet in SOL
-  const [multiplierDisplay, setMultiplierDisplay] = useState("0.00"); // string for display
+  const [payoutSolDisplay, setPayoutSolDisplay] = useState(0);    
+  const [netProfitSolDisplay, setNetProfitSolDisplay] = useState(0); 
+  const [multiplierDisplay, setMultiplierDisplay] = useState("0.00"); 
 
 
   const animRef = useRef(null);
 
-  // single visible UI log panel
   const [logs, setLogs] = useState([]);
   const logsRef = useRef(null);
   function addLog(msg, level = "info") {
     const ts = new Date().toLocaleTimeString();
     const line = `[${ts}] ${msg}`;
-    // keep last 300 entries
     setLogs((prev) => {
       const out = [...prev, { text: line, level }];
       return out.length > 300 ? out.slice(out.length - 300) : out;
@@ -70,7 +63,6 @@ export default function DiceRangeGame() {
     else console.debug(line);
   }
   useEffect(() => {
-    // auto-scroll logs to bottom when new entry arrives
     if (logsRef.current) {
       logsRef.current.scrollTop = logsRef.current.scrollHeight;
     }
@@ -130,7 +122,6 @@ export default function DiceRangeGame() {
   const onChangeRight = (raw) => { let v = Number(raw); if (Number.isNaN(v)) return; v = clamp(v); if (v<leftValue) return; setRightValue(v); };
   function multiplyByTwo() { const v = parseFloat(multValue.toString().replace(",", ".")); if (Number.isNaN(v)) return; setMultValue(String(v*2)); }
 
-  // ---------- Anchor / ORAO helpers ----------
   async function initAnchorForWallet() {
     if (!connected || !publicKey) throw new Error("Wallet not connected");
     const connection = new Connection(RPC, "confirmed");
@@ -187,7 +178,6 @@ export default function DiceRangeGame() {
       if (line.includes("REFUND_RESULT:")) {
         const jsonStr = line.slice(line.indexOf("REFUND_RESULT:") + "REFUND_RESULT:".length).trim();
         const obj = JSON.parse(jsonStr);
-        // obj.bet_amount and obj.compensation expected as numbers (lamports)
         return { event: "refund",
                 player: obj.player,
                 bet_amount: Number(obj.bet_amount || 0),
@@ -233,18 +223,16 @@ export default function DiceRangeGame() {
           return tx;
         }
       } catch (e) {
-        // ignore transient RPC errors
       }
       await new Promise((r) => setTimeout(r, 700));
     }
     throw new Error("Timeout waiting for tx confirmation: " + sig);
   }
 
-  // Manual polling fallback
   async function waitForRandomnessFulfilledRobust(vrfSdk, connection, seedBytes, randomPda, opts = {}) {
     const { pollIntervalMs = 600, timeoutMs = 120000 } = opts;
     const start = Date.now();
-    addLog("Entering robust wait loop for ORAO fulfillment (timeout " + (timeoutMs/1000) + "s) ...");
+    addLog("Entering wait loop for ORAO fulfillment (timeout " + (timeoutMs/1000) + "s) ...");
     while (true) {
       if (Date.now() - start > timeoutMs) {
         addLog("Timeout waiting for ORAO randomness (manual)", "error");
@@ -252,7 +240,7 @@ export default function DiceRangeGame() {
       }
       const acc = await connection.getAccountInfo(randomPda, "confirmed");
       if (!acc) {
-        addLog("Randomness account not created yet (null) — waiting...");
+        addLog("Randomness account not created yet.");
         await new Promise((r)=>setTimeout(r, pollIntervalMs));
         continue;
       }
@@ -266,23 +254,20 @@ export default function DiceRangeGame() {
           return rs;
         }
       } catch (err) {
-        addLog("vrf.getRandomness() decode error (will retry): " + (err?.message || err));
+        addLog("vrf.getRandomness() decode error: " + (err?.message || err));
       }
       await new Promise((r)=>setTimeout(r, pollIntervalMs));
     }
   }
 
-  // ---------- main flow ----------
   async function playOnChain() {
     if (!connected || !publicKey) { alert("Подключите кошелёк"); return; }
     if (!isBetValid()) { alert("Введите корректную ставку (SOL)"); return; }
     if (balance !== null) {
       const betSol = parseBet();
       if (!isBetValid() || betSol <= 0) {
-        // do nothing here — existing alert handles invalid bets
       } else if (balance <= 0 || betSol > balance) {
         setShowOverlayNoMoney(true);
-        // hide overlay automatically after 3s (you can add useEffect for auto-hide), or return immediately
         return;
       }
     }
@@ -306,7 +291,6 @@ export default function DiceRangeGame() {
     const connection = provider.connection;
     const vrfSdk = new Orao(provider);
 
-    // PDAs
     const [vaultPda] = await PublicKey.findProgramAddress([Buffer.from("vault_dice_v2")], PROGRAM_ID);
     const [treasuryPda] = await PublicKey.findProgramAddress([Buffer.from("treasury_dice_v2")], PROGRAM_ID);
     const forceKeypair = Keypair.generate();
@@ -317,7 +301,6 @@ export default function DiceRangeGame() {
 
     addLog("Derived PDAs: randomPda=" + randomPda.toBase58() + " betPda=" + betPda.toBase58());
 
-    // place_bet (игрок)
     try {
       const left = leftValue, right = rightValue, even = parity === "even";
       const placeSig = await prog.methods
@@ -339,7 +322,6 @@ export default function DiceRangeGame() {
       return;
     }
 
-    // request_vrf_agent via agent backend
     let requestSig;
     try {
       const netState = await vrfSdk.getNetworkState();
@@ -376,36 +358,29 @@ export default function DiceRangeGame() {
       return;
     }
 
-    // --- after agent.request returned requestSig ---
     addLog("agent.request tx: " + requestSig);
 
-    // wait for agent tx to confirm (so randomness account is actually created)
     try {
-      await waitForTxConfirmed(connection, requestSig, 90_000); // 90s
+      await waitForTxConfirmed(connection, requestSig, 90_000); 
     } catch (e) {
       addLog("request tx did not confirm in time: " + (e?.message || e), "error");
-      // we continue — fallback poll will catch account when created, but warn user
     }
 
-    // Now try the fast path: vrf.waitFulfilled but with a short timeout
-    addLog("Waiting ORAO fulfillment (fast path using vrf.waitFulfilled) ...");
+    addLog("Waiting ORAO fulfillment (using api vrf.waitFulfilled) ...");
     try {
       const waitFulfilledPromise = vrfSdk.waitFulfilled(seedBytes);
-      const timeoutPromise = new Promise((_, rej) => setTimeout(() => rej(new Error("vrf.waitFulfilled timeout (fast path)")), 20_000)); 
+      const timeoutPromise = new Promise((_, rej) => setTimeout(() => rej(new Error("vrf.waitFulfilled timeout (api)")), 20_000)); 
       await Promise.race([waitFulfilledPromise, timeoutPromise]);
-      addLog("vrf.waitFulfilled fast path success");
+      addLog("vrf.waitFulfilled api success");
     } catch (fastErr) {
-      addLog("Fast path failed or timed out: " + (fastErr?.message || fastErr) + " — falling back to robust polling", "info");
-      // robust polling will check account existence + vrf.getRandomness() repeatedly
+      addLog("Api failed or timed out: " + (fastErr?.message || fastErr) + " - falling back to manual check", "info");
       try {
         await waitForRandomnessFulfilledRobust(vrfSdk, connection, seedBytes, randomPda, { pollIntervalMs: 700, timeoutMs: 20_000 });
-        addLog("Robust polling: ORAO fulfilled");
+        addLog("Manual check: ORAO fulfilled");
       } catch (pollErr) {
-        addLog("waitForRandomnessFulfilledRobust failed: " + (pollErr?.message || pollErr), "error");
-        // === NEW: try to request refund via agent (fallback) ===
-        addLog("Попытка инициировать возврат (refund) через агента ...");
+        addLog("Manual check: " + (pollErr?.message || pollErr), "error");
+        addLog("Trying to refund...");
         try {
-          // build payload for agent refund endpoint
           const refundPayload = {
             playerPubkey: publicKey.toBase58(),
             randomPda: randomPda.toBase58(),
@@ -431,7 +406,6 @@ export default function DiceRangeGame() {
           const refundTxSig = refundJson.txSig;
           addLog("agent.refund tx: " + refundTxSig);
 
-          // wait for refund tx to be confirmed (use existing helper)
           try {
             await waitForTxConfirmed(connection, refundTxSig, 30_000);
             addLog("Refund tx confirmed: " + refundTxSig);
@@ -440,12 +414,10 @@ export default function DiceRangeGame() {
             throw e;
           }
 
-          // parse logs for REFUND_RESULT (re-use existing parser)
           try {
             const parsedRefund = await parseDiceResultFromTx(connection, refundTxSig);
             if (parsedRefund.event === "refund") {
               addLog("REFUND_RESULT received via tx: bet_amount=" + parsedRefund.bet_amount + ", compensation=" + parsedRefund.compensation);
-              // reuse your UI handling path for refund — set overlay fields:
               const betAmountLam = BigInt(parsedRefund.bet_amount || 0);
               const compLam = BigInt(parsedRefund.compensation || 0);
               const refundTotalLam = betAmountLam + compLam;
@@ -461,26 +433,20 @@ export default function DiceRangeGame() {
               setShowOverlayRefund(true);
             } else {
               addLog("Refund tx did not contain REFUND_RESULT event (got " + parsedRefund.event + ")", "error");
-              alert("Refund transaction executed but REFUND_RESULT not found in logs. Проверьте транзакцию: " + refundTxSig);
             }
           } catch (e) {
             addLog("Failed to parse refund tx logs: " + (e?.message || e), "error");
-            alert("Не удалось распарсить возвратную транзакцию. Проверьте в explorer: " + refundTxSig);
           }
         } catch (refundErr) {
           console.error("agent.refund failed:", refundErr);
           addLog("agent.refund failed: " + (refundErr?.message || refundErr), "error");
-          // last-resort: notify user
-          alert("Не дождались ORAO randomness и возврат через агента не удался: " + (refundErr?.message || refundErr).toString());
         } finally {
           setWorking(false);
         }
-        // stop normal flow after refund attempt
         return;
       }
     }
 
-    // resolve via agent
     let resolveSig;
     try {
       const payload2 = {
@@ -513,55 +479,31 @@ export default function DiceRangeGame() {
       return;
     }
 
-    // parse result + overlay handling
     let parsed;
-    // parse result
     try {
        parsed = await parseDiceResultFromTx(connection, resolveSig);
 
-         // ======= DEBUG: временный форс рефанда для тестирования =======
-  // const FORCE_REFUND_TEST = true; // <- поставьте true чтобы протестировать, false чтобы вернуть нормальное поведение
-  // if (FORCE_REFUND_TEST) {
-  //   addLog("DEBUG: forcing REFUND_RESULT (test mode)");
-  //   // betLamports уже есть выше в функции
-  //   const COMPENSATION_LAMPORTS = Math.floor(0.00146 * LAMPORTS_PER_SOL); // компенсация в лампортах
-  //   parsed = {
-  //     event: "refund",
-  //     player: publicKey.toBase58(),
-  //     bet_amount: betLamports,      // существующая переменная number (lamports)
-  //     compensation: COMPENSATION_LAMPORTS
-  //   };
-  // } else {
-  //   parsed = await parseDiceResultFromTx(connection, resolveSig);
-  // }
-  // ==============================================================
-
       if (parsed.event === "refund") {
-        // refund: bet_amount + compensation are lamports
         const betAmountLam = BigInt(parsed.bet_amount || 0);
         const compLam = BigInt(parsed.compensation || 0);
         const refundTotalLam = betAmountLam + compLam;
         const refundTotalSol = Number(refundTotalLam) / LAMPORTS_PER_SOL;
         const betSolLocal = betSol;
 
-        // set UI values for overlay
-        setPayoutSolDisplay(refundTotalSol); // total returned to player
+        setPayoutSolDisplay(refundTotalSol); 
         const netProfit = refundTotalSol - betSolLocal;
         setNetProfitSolDisplay(netProfit);
         setMultiplierDisplay(betSolLocal > 0 ? (refundTotalSol / betSolLocal).toFixed(2) : "0.00");
 
         addLog(`REFUND_RESULT received: bet_amount=${parsed.bet_amount} lamports, compensation=${parsed.compensation} lamports`);
-        // mark UI state
         setResult("refund");
         setShowOverlayRefund(true);
 
       } else if (parsed.event === "dice") {
-        // standard dice result
-        const payoutNetLam = parsed.payoutNetLamports; // BigInt
-        const payoutNetSol = Number(payoutNetLam) / LAMPORTS_PER_SOL; // net profit (as used previously)
+        const payoutNetLam = parsed.payoutNetLamports; 
+        const payoutNetSol = Number(payoutNetLam) / LAMPORTS_PER_SOL; 
         const betSolLocal = betSol;
 
-        // compute total payout (assuming payout_net is "net" profit)
         const totalPayoutSol = betSolLocal + payoutNetSol;
 
         setFinalRoll(parsed.number);
@@ -570,13 +512,11 @@ export default function DiceRangeGame() {
         setWinAmount(payoutNetSol);
         setX(((Number(payoutNetLam) / betLamports) || 0).toFixed(2));
 
-        // prepare overlay fields
-        setPayoutSolDisplay(totalPayoutSol);        // total paid to player (stake + net)
-        setNetProfitSolDisplay(payoutNetSol);       // net profit (may be 0)
+        setPayoutSolDisplay(totalPayoutSol);        
+        setNetProfitSolDisplay(payoutNetSol);      
         setMultiplierDisplay(betSolLocal > 0 ? (totalPayoutSol / betSolLocal).toFixed(2) : "0.00");
 
         addLog("Parsed DICE_RESULT: number=" + parsed.number + " payout_net=" + payoutNetLam.toString());
-        // overlays: big/small win decided below after we compute parity/in-range
         const number = parsed.number;
         const inRange = number >= parsed.left && number <= parsed.right;
         const numberIsEven = (number % 2) === 0;
@@ -596,24 +536,20 @@ export default function DiceRangeGame() {
     } catch (e) {
       console.error("Failed to parse result:", e);
       addLog("Failed to parse result: " + (e?.message || e), "error");
-      alert("Не удалось распарсить результат. Проверьте транзакцию в explorer и логи агента.");
     } finally {
       setWorking(false);
     }
-  } // end playOnChain
+  } 
 
-  // ---------- UI ----------
   const rangeLeftPercent = ((minVal - 1) / 99) * 100;
   const rangeWidthPercent = ((maxVal - minVal + 1) / 100) * 100;
 
-  const baseMultiplier = 40 / rangeSize; // например 40/40 = 1.0
+  const baseMultiplier = 40 / rangeSize; 
   const baseMultiplierStr = baseMultiplier.toFixed(2);
 
-  // Жёстко захардкоденные коэффициенты паритета (как ты просил)
-  const PARITY_WIN_MULT = 1.1;  // если паритет угадан
-  const PARITY_LOSS_MULT = 0.7; // если паритет не угадан
+  const PARITY_WIN_MULT = 1.1;  
+  const PARITY_LOSS_MULT = 0.7; 
 
-  // Возможные комбинированные множители (перед броском мы показываем оба сценария)
   const combinedIfParityCorrect = baseMultiplier * PARITY_WIN_MULT;
   const combinedIfParityWrong = baseMultiplier * PARITY_LOSS_MULT;
   const combinedIfParityCorrectStr = combinedIfParityCorrect.toFixed(2);
@@ -657,7 +593,7 @@ export default function DiceRangeGame() {
       <div style={{ display: "grid", gap: 12 }}>
         <div style={{ display: "flex", gap: 10 }}>
           <button onClick={playOnChain} disabled={!isBetValid() || working} style={{ padding: "8px 14px", borderRadius: 8, background: "#ffd700", fontWeight: 700 }}>
-            {working ? "Выполняется..." : "Кинуть (on-chain)"}
+            {working ? "Выполняется..." : "Кинуть"}
           </button>
 
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -690,7 +626,6 @@ export default function DiceRangeGame() {
           <div style={{ fontSize: 13, color: "#666", marginTop: 6 }}>Вероятность: <strong>{probability.toFixed(2)}%</strong></div>
         </div>
 
-        {/* parity (required) */}
         <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
           <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <input type="radio" name="parity" value="even" checked={parity === "even"} onChange={() => setParity("even")} disabled={rolling} />
@@ -704,7 +639,6 @@ export default function DiceRangeGame() {
           <div style={{ marginLeft: "auto", color: "#777", fontSize: 13, textAlign: "right" }}>
             <div>Паритет обязателен и будет отправлен в контракт.</div>
 
-            {/* Показываем базовый множитель и паритетные варианты */}
             <div style={{ marginTop: 6 }}>
               Базовый множитель (по диапазону): <strong>{baseMultiplierStr}x</strong>
             </div>
@@ -738,7 +672,6 @@ export default function DiceRangeGame() {
           </div>
         </div>
 
-        {/* показываем результат только когда мы НЕ ждём (working=false) */}
         {!working && result && (
           <div style={{ marginTop: 12, padding: 12, borderRadius: 8, background: result === "win" ? "rgba(16,185,129,0.08)" : "rgba(239,68,68,0.06)" }}>
             <div style={{ fontSize: 18, fontWeight: 700 }}>{result === "win" ? "Победа!" : "Проигрыш"}</div>
@@ -774,7 +707,7 @@ export default function DiceRangeGame() {
       {showOverlayBigWin && (
         <div style={{ position: "fixed", top:0, left:0, width:"100%", height:"100%", backgroundColor:"rgba(0,0,0,0.6)", display:"flex", justifyContent:"center", alignItems:"center", zIndex:9999, flexDirection:"column" }}>
           <div style={{ position:"absolute", top:20, color:"#fff", fontSize:65, fontWeight:700, textAlign:"center", width:"100%", fontFamily:'MyFont' }}>
-            Макс вин!!! Профит: {netProfitSolDisplay.toFixed(9)} SOL - Выплата: {payoutSolDisplay.toFixed(9)} SOL; кф = {multiplierDisplay}x
+            Макс вин!!! Выплата: {payoutSolDisplay.toFixed(9)} SOL; кф = {multiplierDisplay}x
           </div>
           <video src="/video/BigWin.mp4" autoPlay style={{ width:"50%", height:"auto", borderRadius:12 }} onEnded={() => { const audio = document.getElementById("bg-audio"); if (audio) audio.volume = 0.6; setShowOverlayBigWin(false); }} />
         </div>
@@ -783,10 +716,9 @@ export default function DiceRangeGame() {
       {showOverlayRefund && (
       <div style={{ position: "fixed", top:0, left:0, width:"100%", height:"100%", backgroundColor:"rgba(0,0,0,0.6)", display:"flex", justifyContent:"center", alignItems:"center", zIndex:9999, flexDirection:"column" }}>
         <div style={{ position:"absolute", top:20, color:"#fff", fontSize:44, fontWeight:700, textAlign:"center", width:"100%", fontFamily:'MyFont' }}>
-          Возврат ставки: {netProfitSolDisplay >= 0 ? "компенсация" : ""} — Чистыми: {netProfitSolDisplay.toFixed(9)} SOL
+          Возврат ставки: Выплата: {payoutSolDisplay.toFixed(9)} SOL
         </div>
 
-        {/* можно заменить видео на ваш файл (или показать статичную картинку) */}
         <video src="/video/loss3.mp4" autoPlay style={{ width:"50%", height:"auto", borderRadius:12 }} onEnded={() => { setShowOverlayRefund(false); }} />
       </div>
     )}
@@ -797,11 +729,10 @@ export default function DiceRangeGame() {
         </div>
       )}
 
-      {/* single logs panel */}
       <div style={{ marginTop: 18 }}>
-        <h4 style={{ marginBottom: 8 }}>Logs (last {logs.length})</h4>
+        <h4 style={{ marginBottom: 8 }}>Логи (последние {logs.length})</h4>
         <div ref={logsRef} style={{ background: "#0b1220", color: "#d1e7ff", padding: 10, height: 180, overflow: "auto", fontSize: 12, borderRadius: 8, whiteSpace: "pre-wrap" }}>
-          {logs.length === 0 ? <div style={{ opacity: 0.6 }}>- no logs yet -</div> : logs.map((l, i) => (
+          {logs.length === 0 ? <div style={{ opacity: 0.6 }}>- Пока нет логов -</div> : logs.map((l, i) => (
             <div key={i} style={{ color: l.level === "error" ? "#ffb4b4" : "#d1e7ff", marginBottom: 4 }}>{l.text}</div>
           ))}
         </div>

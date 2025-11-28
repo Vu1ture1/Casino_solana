@@ -1,4 +1,3 @@
-// ScratchCard3x3.jsx
 import { FaCheck } from "react-icons/fa";
 import { FaTimes } from "react-icons/fa";
 import React, { useEffect, useRef, useState, useMemo } from "react";
@@ -18,8 +17,7 @@ const TREASURY_SEED = "treasury_scratch_v1";
 const CONFIG_AGENT_SEED = "config_agent_scratch_v1";
 const AGENT_BASE = process.env.REACT_APP_AGENT_SCRATCH_BASE || "http://localhost:3002";
 
-// Fixed SOL price (вы просили фиксированный курс)
-const FIXED_SOL_PRICE = 141.79; 
+//const FIXED_SOL_PRICE = 141.79; 
 
 export default function ScratchCard3x3({ images = [
     "/images/cases/1_1.jpg",
@@ -35,7 +33,6 @@ export default function ScratchCard3x3({ images = [
   const { publicKey, connected, wallet } = useWallet();
   const connectionRef = useRef(new Connection(RPC, "confirmed"));
 
-  // UI state
   const [started, setStarted] = useState(false);
   const [selectedSet, setSelectedSet] = useState(() => new Set());
   const [revealed, setRevealed] = useState(false);
@@ -43,31 +40,43 @@ export default function ScratchCard3x3({ images = [
   const [cellState, setCellState] = useState({});
   const [working, setWorking] = useState(false);
 
-  // overlays / result
   const [showOverlayWin, setShowOverlayWin] = useState(false);
   const [showOverlayLoss, setShowOverlayLoss] = useState(false);
   const [showOverlayBigWin, setShowOverlayBigWin] = useState(false);
   const [showOverlayNoMoney, setShowOverlayNoMoney] = useState(false);
 
-  // betting + balance
   const [multValue, setMultValue] = useState("");
   const [balance, setBalance] = useState(null);
   const [x, setX] = useState(1.0);
 
-  // parsed result (from resolve_bet)
-  const [result, setResult] = useState(null); // { choices, winning, matches, payoutNetLamports, payoutNetSol, raw }
+  const [result, setResult] = useState(null); 
 
-  // logs
   const [log, setLog] = useState([]);
   function addLog(s) {
     const ts = new Date().toLocaleTimeString();
     const line = `[${ts}] ${s}`;
     setLog((l) => [...l, line]);
-    // eslint-disable-next-line no-console
     console.log(line);
   }
 
-  // connection instance
+  const [solPrice, setSolPrice] = useState(null);
+
+  useEffect(() => {
+    async function getSolPrice() {
+      try {
+        const r = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd");
+        const j = await r.json();
+        setSolPrice(j.solana?.usd ?? null);
+      } catch (e) {
+        addLog("Failed fetching SOL price: " + (e?.message || e), "info");
+        setSolPrice(null);
+      }
+    }
+    getSolPrice();
+    const id = setInterval(getSolPrice, 60_000); 
+    return () => clearInterval(id);
+  }, []);
+
   const connection = connectionRef.current;
 
   useEffect(() => {
@@ -93,7 +102,6 @@ export default function ScratchCard3x3({ images = [
     setMultValue(String(v * 2));
   }
 
-  // helpers: shuffle/pick images
   const shuffle = (arr) => { const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
   const pickUniqueImages = () => {
     if (!images || images.length === 0) return Array(9).fill(null);
@@ -106,16 +114,14 @@ export default function ScratchCard3x3({ images = [
     return shuffled.slice(0, 9);
   };
 
-  // Deal cards (start game)
   async function handleDeal() {
     if (!connected || !publicKey) {
-      addLog("handleDeal: wallet not connected");
+      addLog("Wallet not connected");
       return;
     }
     const bet = parseFloat(multValue) || 0;
     if (bet <= 0) {
-      // allow dealing even if bet empty? в первой версии требовалось ставку — оставлю поведение: требуется ставка для раздачи
-      addLog("Введите корректную ставку (SOL) перед раздачей");
+      addLog("Incorrect Bet");
       return;
     }
     setWorking(false);
@@ -140,7 +146,6 @@ export default function ScratchCard3x3({ images = [
   };
 
   const handlePlayAgain = () => {
-    // keep multValue (bet) as-is so user can reuse or edit
     setSelectedSet(new Set());
     setRevealed(false);
     setAssignedImages(pickUniqueImages());
@@ -151,7 +156,7 @@ export default function ScratchCard3x3({ images = [
     setShowOverlayLoss(false);
     setShowOverlayNoMoney(false);
     setWorking(false);
-    addLog("Играть снова — новая раздача (ставка сохранена)");
+    addLog("Play Again)");
   };
 
   const handleCellClick = (index) => {
@@ -169,7 +174,6 @@ export default function ScratchCard3x3({ images = [
 
   const matrix = useMemo(() => Array.from({ length: 9 }, (_, i) => (selectedSet.has(i) ? 1 : 0)), [selectedSet]);
 
-  // ---------- NEW: helpers for robust waiting ----------
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   async function waitForTxConfirmed(connection, sig, timeoutMs = 60_000) {
     addLog("Waiting for tx confirmation: " + sig);
@@ -182,14 +186,13 @@ export default function ScratchCard3x3({ images = [
           return tx;
         }
       } catch (e) {
-        // ignore transient errors
       }
       await sleep(700);
     }
     throw new Error("Timeout waiting for tx confirmation: " + sig);
   }
   async function waitForRandomnessAccount(connection, randomPda, timeoutMs = 60_000) {
-    addLog("Polling for randomness account: " + randomPda.toBase58());
+    addLog("Searching for randomness account: " + randomPda.toBase58());
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
       try {
@@ -199,14 +202,12 @@ export default function ScratchCard3x3({ images = [
           return info;
         }
       } catch (e) {
-        // ignore
       }
       await sleep(700);
     }
     throw new Error("Timeout waiting for randomness account: " + randomPda.toBase58());
   }
 
-  // ---------- finalizeSelection (improved + sets result state) ----------
   async function finalizeSelection() {
     if (selectedSet.size < 3) {
       addLog("finalizeSelection: need 3 selections, have " + selectedSet.size);
@@ -229,7 +230,6 @@ export default function ScratchCard3x3({ images = [
     }
     addLog("Bet (lamports): " + betLamports);
 
-    // Load IDL if present (optional)
     let idl = null;
     try {
       const resp = await fetch("/idl/scratch_card.json");
@@ -239,7 +239,6 @@ export default function ScratchCard3x3({ images = [
       addLog("Failed to fetch idl (ok): " + String(e));
     }
 
-    // Prepare wallet wrapper for Anchor provider (like slot)
     let walletObj = wallet || (window?.solana && window.solana.isPhantom ? window.solana : null);
     if (!walletObj && !window?.solana) {
       addLog("No signer available (wallet). Aborting.");
@@ -285,12 +284,12 @@ export default function ScratchCard3x3({ images = [
     };
 
     const provider = new AnchorProvider(connectionLocal, walletForAnchor, AnchorProvider.defaultOptions());
-    const program = new anchor.Program(idl || {}, provider); // <-- DO NOT pass PROGRAM_ID third arg
+    const program = new anchor.Program(idl || {}, provider); 
     const vrf = new Orao(provider);
 
     addLog("Anchor program created (via IDL + provider).");
 
-    // PDAs
+
     const [vaultPda] = await PublicKey.findProgramAddress([Buffer.from(VAULT_SEED)], PROGRAM_ID);
     const [treasuryPda] = await PublicKey.findProgramAddress([Buffer.from(TREASURY_SEED)], PROGRAM_ID);
     const [configAgentPda] = await PublicKey.findProgramAddress([Buffer.from(CONFIG_AGENT_SEED)], PROGRAM_ID);
@@ -298,7 +297,6 @@ export default function ScratchCard3x3({ images = [
     addLog("Treasury PDA: " + treasuryPda.toBase58());
     addLog("Config (agent) PDA: " + configAgentPda.toBase58());
 
-    // prepare ORAO randomness seed
     const forceKeypair = anchor.web3.Keypair.generate();
     const seedBytes = forceKeypair.publicKey.toBuffer();
     const randomPda = randomnessAccountAddress(seedBytes);
@@ -309,7 +307,6 @@ export default function ScratchCard3x3({ images = [
     addLog("Derived randomness PDA: " + randomPda.toBase58());
     addLog("Derived Bet PDA: " + betPda.toBase58());
 
-    // fetch orao network state
     let netState;
     try {
       netState = await vrf.getNetworkState();
@@ -320,9 +317,8 @@ export default function ScratchCard3x3({ images = [
       return;
     }
 
-    // STEP 0: placeBet (player signs)
     try {
-      addLog("Calling placeBet on-chain (player will sign) ...");
+      addLog("Calling placeBet on-chain...");
       const placeSig = await program.methods
         .placeBet(new anchor.BN(betLamports), choices)
         .accounts({
@@ -340,10 +336,9 @@ export default function ScratchCard3x3({ images = [
       return;
     }
 
-    // STEP 1: request_vrf via AGENT backend (agent will sign & pay)
     let requestTx;
     try {
-      addLog("Requesting agent to send request_vrf_agent ...");
+      addLog("Requesting agent to send request_vrf_agent...");
       const body = {
         seedPubkey: forceKeypair.publicKey.toBase58(),
         randomPda: randomPda.toBase58(),
@@ -369,17 +364,15 @@ export default function ScratchCard3x3({ images = [
       return;
     }
 
-    // wait for request tx confirmation (best-effort)
     try {
       await waitForTxConfirmed(connectionLocal, requestTx, 90_000);
     } catch (e) {
       addLog("request tx did not confirm in time: " + e.message);
     }
 
-    // STEP 2: Poll randomness-account existence and waitFulfilled
     try {
       await waitForRandomnessAccount(connectionLocal, randomPda, 90_000);
-      addLog("Randomness account detected; calling vrf.waitFulfilled() to ensure finalization...");
+      addLog("Randomness account detected; calling vrf.waitFulfilled()...");
       const waitFulfilledPromise = vrf.waitFulfilled(seedBytes);
       const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error("waitFulfilled timeout after 60s")), 60_000));
       await Promise.race([waitFulfilledPromise, timeout]);
@@ -388,7 +381,6 @@ export default function ScratchCard3x3({ images = [
       addLog("ORAO fulfillment / randomness detection error: " + String(e));
     }
 
-    // STEP 3: resolve via agent
     let resolveTx;
     let parsed;
     try {
@@ -411,18 +403,15 @@ export default function ScratchCard3x3({ images = [
       resolveTx = j.txSig;
       addLog("resolve_bet tx sig: " + resolveTx);
 
-      // parse result from tx logs (this polls until logs available)
       parsed = await parseScratchResultFromTx(connectionLocal, resolveTx);
       addLog("Parsed SCRATCH_RESULT: " + JSON.stringify(parsed.raw));
     } catch (e) {
-      addLog("resolve_bet (via agent) failed: " + (e?.message || String(e)));
+      addLog("resolve_bet failed: " + (e?.message || String(e)));
       setWorking(false);
-      // reveal selections for debug
       setRevealed(true);
       return;
     }
 
-    // FINISH: show results in UI (now reveal)
     try {
       const payoutLamports = Number(parsed.payoutNetLamports || 0n);
       const multiplier = betLamports > 0 ? (payoutLamports / betLamports) : 0;
@@ -448,7 +437,6 @@ export default function ScratchCard3x3({ images = [
     }
   }
 
-  // parser for SCRATCH_RESULT
   async function parseScratchResultFromTx(connectionLocal, txSig, maxAttempts = 20) {
     addLog("Parsing SCRATCH_RESULT from tx: " + txSig);
     let attempt = 0;
@@ -502,13 +490,11 @@ export default function ScratchCard3x3({ images = [
     throw new Error("No transaction meta/logs available after retries");
   }
 
-  // utility: compute sets for final rendering
   const winningSet = useMemo(() => {
     if (!result || !Array.isArray(result.winning)) return new Set();
     return new Set(result.winning.map((n) => (typeof n === "number" ? n - 1 : Number(n) - 1)).filter((x) => Number.isFinite(x)));
   }, [result]);
 
-  // render summary values
   const payoutLamports = result?.payoutNetLamports || 0;
   const payoutSol = (result?.payoutNetSol) ?? 0;
   const betVal = parseFloat(multValue) || 0;
@@ -517,18 +503,15 @@ export default function ScratchCard3x3({ images = [
   const netProfitSol = netProfitLamports / LAMPORTS_PER_SOL;
   const multiplierDisplay = betLamports > 0 ? ((payoutLamports || 0) / betLamports) : x;
 
-  // validity for UI
   const betValid = !Number.isNaN(betVal) && betVal > 0;
   const finalizeEnabled = betValid && selectedSet.size === 3 && !working && started;
 
 return (
-  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16, marginTop: 120, paddingTop: 120 /* <-- Измените это значение, чтобы сдвинуть весь интерфейс вниз (header offset). */ }}>
-    {/* TOP PANEL (single combined panel) */}
+  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16, marginTop: 120, paddingTop: 120  }}>
     <div style={{ backgroundColor: "white", gap: "10px", borderRadius: 12, padding: "18px", width: "95%", maxWidth: 1100 }}>
       <h2 style={{ textAlign: "center", fontFamily: 'MyFont', margin: 0 }}>3x3 Скретч-карточный дэп</h2>
 
       <div style={{ display: "flex", flexDirection: "row", gap: "12px", marginTop: "12px", justifyContent: "center", alignItems: "center" }}>
-        {/* Deal / Start */}
         <button
           style={{
             padding: "8px 14px",
@@ -540,13 +523,12 @@ return (
             minWidth: 110,
           }}
           onClick={handleDeal}
-          disabled={working || !betValid} // require valid bet to deal
+          disabled={working || !betValid} 
           title={"Раздать карты (требуется корректная ставка)"}
         >
           {working ? "Подождите…" : "Раздать"}
         </button>
 
-        {/* Bet input */}
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <input
             type="number"
@@ -560,7 +542,7 @@ return (
           />
           <span style={{ fontWeight: "bold" }}>≈</span>
           <span style={{ fontWeight: "normal", fontFamily: 'MyFont' }}>
-            {multValue === "" ? "0.000" : (parseFloat(multValue) * FIXED_SOL_PRICE).toFixed(9)} USD
+            {multValue === "" ? "0.000" : (parseFloat(multValue) * solPrice).toFixed(9)} USD
           </span>
 
           <button onClick={multiplyByTwo} style={{ padding: "8px 12px", borderRadius: 8, background: "#512DA8", color: "#fff", fontWeight: 600 }} disabled={working}>
@@ -568,7 +550,6 @@ return (
           </button>
         </div>
 
-        {/* Finalize (Играть) */}
         <button
           onClick={finalizeSelection}
           disabled={!finalizeEnabled}
@@ -587,11 +568,9 @@ return (
           {working ? "Лудим…" : "Играть"}
         </button>
 
-        {/* NOTE: "Играть снова" and "Сброс" buttons removed from top panel as requested */}
       </div>
     </div>
 
-    {/* Game area */}
     {started && (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, width: "95%", maxWidth: 1100 }}>
         <div style={{ backgroundColor: "white", display: "flex", flexDirection: "row", gap: "5px", borderRadius: 12, padding: "12px", width: "100%", alignItems: "center" }}>
@@ -609,22 +588,20 @@ return (
             const isSelected = selectedSet.has(idx);
             const state = cellState[idx] || { rx: 0, ry: 0, hover: false, pressed: false };
 
-            // final colors when revealed & result exists
             let bgColor = "#fff";
             let border = "3px solid rgba(0,0,0,0.06)";
             if (revealed && result) {
               if (winningSet.has(idx)) {
-                bgColor = "#4CAF50"; // green for winners
+                bgColor = "#4CAF50"; 
                 border = "3px solid #2e7d32";
               } else {
-                bgColor = "#FF5252"; // red for losers
+                bgColor = "#FF5252"; 
                 border = "3px solid #b71c1c";
               }
             } else {
               border = "3px solid rgba(0,0,0,0.06)";
             }
 
-            // yellow highlight for player's selected cards — NO offset, strong thickness
             const selectGlow = isSelected ? { boxShadow: "0 0 0 8px rgba(255,215,0,0.95)" } : {};
 
             const innerShadow = (revealed && result && winningSet.has(idx)) ? "inset 0 0 30px rgba(255,255,255,0.12)" : "none";
@@ -706,7 +683,6 @@ return (
       </div>
     )}
 
-    {/* result + logs (white panels) */}
     <div style={{ width: "90%", maxWidth: 980, background: "#fff", borderRadius: 10, padding: 12 }}>
 
       {result ? (
@@ -714,23 +690,22 @@ return (
           <div>Наши выборы (1..9): {Array.isArray(result.choices) ? result.choices.join(", ") : String(result.choices)}</div>
           <div>Выигрышные позиции (1..9): {Array.isArray(result.winning) ? result.winning.join(", ") : String(result.winning)}</div>
           <div>Совпадений: {result.matches}</div>
-          <div>Выплата: {payoutLamports} lamports ({(payoutLamports / LAMPORTS_PER_SOL).toFixed(9)} SOL)</div>
+          <div>Выплата: {payoutLamports} лампортов ({(payoutLamports / LAMPORTS_PER_SOL).toFixed(9)} SOL)</div>
         </div>
       ) : (
-        <div style={{ marginBottom: 8 }}>No result yet</div>
+        <div style={{ marginBottom: 8 }}>Пока нет результатов</div>
       )}
 
-      <h4 style={{ marginBottom: 6 }}>Logs</h4>
+      <h4 style={{ marginBottom: 6 }}>Логи</h4>
       <div style={{ background: "#111", color: "#fff", padding: 10, height: 220, overflow: "auto", fontSize: 12 }}>
         {log.map((l, i) => <div key={i} style={{ whiteSpace: "pre-wrap", marginBottom: 4 }}>{l}</div>)}
       </div>
     </div>
 
-    {/* (overlays unchanged) */}
     {showOverlayWin && (
       <div style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", backgroundColor: "rgba(0,0,0,0.6)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999, flexDirection: "column" }}>
         <div style={{ position: "absolute", top: 20, color: "#fff", fontSize: 48, fontWeight: 700, textAlign: "center", width: "100%", fontFamily: 'MyFont' }}>
-          Выигрыш! Выплата: {(payoutLamports / LAMPORTS_PER_SOL).toFixed(9)} SOL — чистыми: {netProfitSol.toFixed(9)} SOL; кф = {multiplierDisplay}x
+          Выигрыш! Выплата: {(payoutLamports / LAMPORTS_PER_SOL).toFixed(9)} SOL ; кф = {multiplierDisplay}x
         </div>
 
         <video src="/video/win.mp4" autoPlay style={{ width: "50%", height: "auto", borderRadius: "12px" }} onEnded={() => { setShowOverlayWin(false); }} />
@@ -740,7 +715,7 @@ return (
     {showOverlayBigWin && (
       <div style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", backgroundColor: "rgba(0,0,0,0.6)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999, flexDirection: "column" }}>
         <div style={{ position: "absolute", top: 20, color: "#fff", fontSize: 48, fontWeight: 700, textAlign: "center", width: "100%", fontFamily: 'MyFont' }}>
-          Большой выигрыш!!! Выплата: {(payoutLamports / LAMPORTS_PER_SOL).toFixed(9)} SOL — чистыми: {netProfitSol.toFixed(9)} SOL; кф = {multiplierDisplay}x
+          Макс Вин!!! Выплата: {(payoutLamports / LAMPORTS_PER_SOL).toFixed(9)} SOL; кф = {multiplierDisplay}x
         </div>
 
         <video src="/video/BigWin.mp4" autoPlay style={{ width: "50%", height: "auto", borderRadius: "12px" }} onEnded={() => { setShowOverlayBigWin(false); }} />
