@@ -783,7 +783,7 @@ export default function DiceRangeGame() {
       {showOverlayRefund && (
       <div style={{ position: "fixed", top:0, left:0, width:"100%", height:"100%", backgroundColor:"rgba(0,0,0,0.6)", display:"flex", justifyContent:"center", alignItems:"center", zIndex:9999, flexDirection:"column" }}>
         <div style={{ position:"absolute", top:20, color:"#fff", fontSize:44, fontWeight:700, textAlign:"center", width:"100%", fontFamily:'MyFont' }}>
-          Возврат ставки: {netProfitSolDisplay >= 0 ? "компенсация" : ""} — Чистыми: {netProfitSolDisplay.toFixed(9)} SOL — Выплата: {payoutSolDisplay.toFixed(9)} SOL; кф = {multiplierDisplay}x
+          Возврат ставки: {netProfitSolDisplay >= 0 ? "компенсация" : ""} — Чистыми: {netProfitSolDisplay.toFixed(9)} SOL
         </div>
 
         {/* можно заменить видео на ваш файл (или показать статичную картинку) */}

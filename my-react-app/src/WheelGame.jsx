@@ -1,4 +1,3 @@
-// src/components/WheelGame.jsx
 import React, { useEffect, useRef, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import {
@@ -23,7 +22,6 @@ const AGENT_BASE = process.env.REACT_APP_AGENT_BASE || "http://localhost:3004";
 export default function WheelGame() {
   const { publicKey, connected, wallet } = useWallet();
 
-  // logs
   const [logs, setLogs] = useState([]);
   const logsRef = useRef(null);
   function addLog(msg, level = "info") {
@@ -38,13 +36,29 @@ export default function WheelGame() {
   }
 
 
-  // on-chain state
   const [working, setWorking] = useState(false);
   const [betValue, setBetValue] = useState("0.001");
   const [finalText, setFinalText] = useState(null);
   const [payoutSol, setPayoutSol] = useState(0);
-    // balance (для проверки NoMoney)
   const [balance, setBalance] = useState(null);
+
+const [solPrice, setSolPrice] = useState(null);
+
+  useEffect(() => {
+    async function getSolPrice() {
+      try {
+        const r = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd");
+        const j = await r.json();
+        setSolPrice(j.solana?.usd ?? null);
+      } catch (e) {
+        addLog("Failed fetching SOL price: " + (e?.message || e), "info");
+        setSolPrice(null);
+      }
+    }
+    getSolPrice();
+    const id = setInterval(getSolPrice, 60_000); 
+    return () => clearInterval(id);
+  }, []);
 
     useEffect(() => { if (logsRef.current) logsRef.current.scrollTop = logsRef.current.scrollHeight; }, [logs.length]);
     useEffect(() => {
@@ -65,13 +79,11 @@ export default function WheelGame() {
     return () => { mounted = false; clearInterval(interval); };
   }, [connected, publicKey]);
 
-  // wheel UI state
-  const [spinningInfinite, setSpinningInfinite] = useState(false); // infinite spin while waiting
-  const [rotationDeg, setRotationDeg] = useState(0); // current applied rotation (deg)
-  const [isTransitioningToResult, setIsTransitioningToResult] = useState(false); // when we animate to result
-  const [resultNumber, setResultNumber] = useState(null); // final number 1..100
+  const [spinningInfinite, setSpinningInfinite] = useState(false); 
+  const [rotationDeg, setRotationDeg] = useState(0); 
+  const [isTransitioningToResult, setIsTransitioningToResult] = useState(false); 
+  const [resultNumber, setResultNumber] = useState(null); 
 
-  // --- add these for refund UI ---
   const [showOverlayRefund, setShowOverlayRefund] = useState(false);
   const [showOverlayWin, setShowOverlayWin] = useState(false);
   const [showOverlayLoss, setShowOverlayLoss] = useState(false);
@@ -83,18 +95,16 @@ export default function WheelGame() {
 
 
   const wheelRef = useRef(null);
-  const transitionResolveRef = useRef(null); // to await transition end if needed
-  const cumulativeBaseRotRef = useRef(0); // maintain base rotation between spins
+  const transitionResolveRef = useRef(null); 
+  const cumulativeBaseRotRef = useRef(0); 
 
-  // constants for wheel drawing
   const N_SECTORS = 100;
-  const SECTOR_ANGLE = 360 / N_SECTORS; // 3.6
-  const WHEEL_SIZE = 360; // px (SVG viewport)
-  const R = WHEEL_SIZE / 2; // radius
+  const SECTOR_ANGLE = 360 / N_SECTORS; 
+  const WHEEL_SIZE = 360; 
+  const R = WHEEL_SIZE / 2; 
   const OUTER_R = R - 4;
   const INNER_R = 0;
 
-  // categories definition (same as in Rust)
   const categories = [
     { start: 1, end: 5, bps: 0 },        // 1..5 -> 0.0
     { start: 6, end: 18, bps: 7500 },    // 6..18 -> 0.75
@@ -107,22 +117,49 @@ export default function WheelGame() {
     { start: 100, end: 100, bps: 500000 } // 100 -> 50.0
   ];
 
-  // color palette for categories (distinct)
   const categoryColors = [
-    "#bdbdbd", // 0.0 gray
-    "#60a5fa", // 0.75 light blue
-    "#34d399", // 1.25 turquoise/green
-    "#4ade80", // 1.0 green
-    "#fb923c", // 1.5 orange
-    "#facc15", // 2.0 yellow
-    "#a78bfa", // 0.5 purple
-    "#f97373", // 10.0 red
-    "#f59e0b"  // 50.0 gold
+    "#bdbdbd",
+    "#60a5fa", 
+    "#34d399", 
+    "#4ade80", 
+    "#fb923c", 
+    "#facc15", 
+    "#a78bfa", 
+    "#f97373", 
+    "#f59e0b"  
   ];
 
-  // helper: pick category color by sector index (1..100)
+  const animRef = useRef(null);
+  const lastTsRef = useRef(null);
+
+  function startInfiniteSpin() {
+    if (animRef.current) return;
+    lastTsRef.current = null;
+    const speedDegPerSec = 360 * 1.4; 
+    const step = (ts) => {
+      if (!lastTsRef.current) lastTsRef.current = ts;
+      const dt = Math.min(100, ts - lastTsRef.current); 
+      lastTsRef.current = ts;
+      setRotationDeg((prev) => prev + (speedDegPerSec * (dt / 1000)));
+      animRef.current = requestAnimationFrame(step);
+    };
+    animRef.current = requestAnimationFrame(step);
+  }
+
+  function stopInfiniteSpin() {
+    if (!animRef.current) return;
+    cancelAnimationFrame(animRef.current);
+    animRef.current = null;
+    lastTsRef.current = null;
+  }
+
+  useEffect(() => {
+  return () => {
+    if (animRef.current) cancelAnimationFrame(animRef.current);
+  };
+}, []);
+
   function colorForIndex(idx1) {
-    // idx1: 1..100
     for (let ci = 0; ci < categories.length; ci++) {
       const c = categories[ci];
       if (idx1 >= c.start && idx1 <= c.end) return categoryColors[ci];
@@ -130,11 +167,9 @@ export default function WheelGame() {
     return "#cccccc";
   }
 
-  // build sectors array once
   const sectors = (() => {
     const arr = [];
     for (let i = 1; i <= N_SECTORS; i++) {
-      // label optionally every 5 or 10
       arr.push({
         num: i,
         color: colorForIndex(i),
@@ -143,9 +178,7 @@ export default function WheelGame() {
     return arr;
   })();
 
-  // draw wedge path for sector i (1-based)
   function wedgePath(i) {
-    // angle start measured from -90deg (12 o'clock) clockwise
     const startAngle = -90 + (i - 1) * SECTOR_ANGLE;
     const endAngle = startAngle + SECTOR_ANGLE;
     const sx = R + OUTER_R * Math.cos((Math.PI / 180) * startAngle);
@@ -156,18 +189,15 @@ export default function WheelGame() {
     return `M ${R} ${R} L ${sx} ${sy} A ${OUTER_R} ${OUTER_R} 0 ${largeArc} 1 ${ex} ${ey} Z`;
   }
 
-  // utility: wait for transition end on wheel
   function waitForTransitionEnd(el) {
     return new Promise((resolve) => {
       if (!el) return resolve();
       const handler = (e) => {
-        // only care about transform transitions
         if (e.propertyName && e.propertyName !== "transform") return;
         el.removeEventListener("transitionend", handler);
         resolve();
       };
       el.addEventListener("transitionend", handler);
-      // safety timeout
       setTimeout(() => {
         try { el.removeEventListener("transitionend", handler); } catch {}
         resolve();
@@ -175,7 +205,6 @@ export default function WheelGame() {
     });
   }
 
-  // --- On-chain helpers (copied/kept from your code) ---
   async function initAnchorForWallet() {
     if (!connected || !publicKey) throw new Error("Wallet not connected");
     const connection = new Connection(RPC, "confirmed");
@@ -267,7 +296,7 @@ export default function WheelGame() {
   async function waitForRandomnessFulfilledRobust(vrfSdk, connection, seedBytes, randomPda, opts = {}) {
     const { pollIntervalMs = 700, timeoutMs = 180000 } = opts;
     const start = Date.now();
-    addLog("Entering robust wait loop for ORAO fulfillment (timeout " + (timeoutMs/1000) + "s) ...");
+    addLog("Entering another wait loop for ORAO fulfillment (timeout " + (timeoutMs/1000) + "s) ...");
     while (true) {
       if (Date.now() - start > timeoutMs) throw new Error("Timeout waiting for ORAO randomness (manual)");
       const acc = await connection.getAccountInfo(randomPda, "confirmed");
@@ -283,13 +312,12 @@ export default function WheelGame() {
           return rs;
         }
       } catch (err) {
-        addLog("vrf.getRandomness() decode error (will retry): " + (err?.message || err));
+        addLog("vrf.getRandomness() decode error: " + (err?.message || err));
       }
       await new Promise((r)=>setTimeout(r, pollIntervalMs));
     }
   }
 
-  // helper: wait until randomness account exists (so vrf.waitFulfilled won't fail early)
   async function waitForAccountCreated(connection, pubkey, timeoutMs = 60000, pollIntervalMs = 700) {
     const start = Date.now();
     while (true) {
@@ -302,7 +330,6 @@ export default function WheelGame() {
     }
   }
 
-  // helper: wait until a tx appears as confirmed (polling)
   async function waitForTxConfirmed(connection, sig, timeoutMs = 30_000) {
     addLog("Waiting for tx confirmation: " + sig);
     const start = Date.now();
@@ -314,9 +341,7 @@ export default function WheelGame() {
           return tx;
         }
       } catch (e) {
-        // ignore transient RPC errors
-        // but log occasionally to help debugging
-        // addLog("tx confirm poll error: " + (e?.message || e), "info");
+
       }
       await new Promise((r) => setTimeout(r, 700));
     }
@@ -324,19 +349,17 @@ export default function WheelGame() {
   }
 
 
-  // main flow: spin wheel on chain
   async function spinWheelOnChain() {
     if (!connected || !publicKey) { alert("Подключите кошелёк"); return; }
     const betSol = parseFloat(String(betValue).replace(",", "."));
     if (Number.isNaN(betSol) || betSol <= 0) { alert("Введите корректную ставку"); return; }
     if (balance !== null) {
       if (betSol <= 0) {
-        // handled earlier
       } else if (balance <= 0 || betSol > balance) {
         setShowOverlayNoMoney(true);
-        // optionally auto-hide later; stop flow
         setWorking(false);
         setSpinningInfinite(false);
+        stopInfiniteSpin();
         return;
       }
     }
@@ -354,7 +377,6 @@ export default function WheelGame() {
     const connection = provider.connection;
     const vrfSdk = new Orao(provider);
 
-    // PDAs & randomness
     const [vaultPda] = await PublicKey.findProgramAddress([Buffer.from("vault_wheel_v1")], PROGRAM_ID);
     const [treasuryPda] = await PublicKey.findProgramAddress([Buffer.from("treasury_wheel_v1")], PROGRAM_ID);
     const forceKeypair = Keypair.generate();
@@ -365,10 +387,9 @@ export default function WheelGame() {
 
     addLog("Derived PDAs: randomPda=" + randomPda.toBase58() + " betPda=" + betPda.toBase58());
 
-    // start infinite spinning UI immediately
     setSpinningInfinite(true);
+    startInfiniteSpin();
 
-    // place_bet (player)
     const betLamports = Math.floor(betSol * LAMPORTS_PER_SOL);
     try {
       const placeSig = await prog.methods
@@ -386,10 +407,10 @@ export default function WheelGame() {
       addLog("place_bet failed: " + (e?.message || e), "error");
       setWorking(false);
       setSpinningInfinite(false);
+      stopInfiniteSpin();
       return;
     }
 
-    // agent.request
     let requestSig;
     try {
       const netState = await vrfSdk.getNetworkState();
@@ -416,10 +437,10 @@ export default function WheelGame() {
       addLog("agent.request failed: " + (e?.message || e), "error");
       setWorking(false);
       setSpinningInfinite(false);
+      stopInfiniteSpin();
       return;
     }
 
-    // wait for randomness account creation before using waitFulfilled
     try {
       addLog("Waiting for randomness account to appear...");
       const acc = await waitForAccountCreated(connection, randomPda, 60000, 700);
@@ -428,26 +449,26 @@ export default function WheelGame() {
       addLog("Randomness account not created in time: " + (e?.message || e), "error");
       setWorking(false);
       setSpinningInfinite(false);
+      stopInfiniteSpin();
       return;
     }
 
-    // wait for ORAO fulfillment (fast path + robust fallback)
-    addLog("Waiting ORAO fulfillment (fast path) ...");
+    addLog("Waiting ORAO fulfillment (checking with api) ...");
     try {
       const waitFulfilledPromise = vrfSdk.waitFulfilled(seedBytes);
-      const timeoutPromise = new Promise((_, rej) => setTimeout(() => rej(new Error("vrf.waitFulfilled timeout (fast path)")), 20000)); // 30s
+      const timeoutPromise = new Promise((_, rej) => setTimeout(() => rej(new Error("vrf.waitFulfilled timeout (fast path)")), 20000)); 
       await Promise.race([waitFulfilledPromise, timeoutPromise]);
-      addLog("vrf.waitFulfilled fast path success");
+      addLog("vrf.waitFulfilled api check success");
     } catch (fastErr) {
-      addLog("Fast path failed/timeout: " + (fastErr?.message || fastErr) + " — falling back to robust polling");
+      addLog("API check failed/timeout: " + (fastErr?.message || fastErr) + " - falling back to manual check");
       try {
         await waitForRandomnessFulfilledRobust(vrfSdk, connection, seedBytes, randomPda, { pollIntervalMs: 700, timeoutMs: 20000 });
-        addLog("Robust polling: ORAO fulfilled");
+        addLog("Manual check: ORAO fulfilled");
       } catch (pollErr) {
         addLog("Randomness wait failed: " + (pollErr?.message || pollErr), "error");
         setSpinningInfinite(false);
-        // === try to request refund via agent ===
-        addLog("Попытка инициировать возврат (refund) через агента ...");
+        stopInfiniteSpin();
+        addLog("Attempt to refund ...");
         try {
           const payloadRefund = {
             playerPubkey: publicKey.toBase58(),
@@ -471,7 +492,6 @@ export default function WheelGame() {
           const refundTx = refundJson.txSig;
           addLog("agent.refund tx: " + refundTx);
 
-          // wait for refund tx confirm
           try {
             await waitForTxConfirmed(connection, refundTx, 30_000);
             addLog("Refund tx confirmed: " + refundTx);
@@ -480,7 +500,6 @@ export default function WheelGame() {
             throw e;
           }
 
-          // parse refund logs
           const parsedRefund = await parseWheelResultFromTx(connection, refundTx);
           if (parsedRefund.event === "refund") {
             addLog("REFUND_RESULT received via tx: bet_amount=" + parsedRefund.bet_amount + ", compensation=" + parsedRefund.compensation);
@@ -488,7 +507,7 @@ export default function WheelGame() {
             const compLam = BigInt(parsedRefund.compensation || 0);
             const refundTotalLam = betAmountLam + compLam;
             const refundTotalSol = Number(refundTotalLam) / LAMPORTS_PER_SOL;
-            const betSolLocal = betSol; // betSol defined earlier in this function
+            const betSolLocal = betSol; 
 
             setPayoutSolDisplay(refundTotalSol);
             const netProfit = refundTotalSol - betSolLocal;
@@ -500,21 +519,20 @@ export default function WheelGame() {
             setShowOverlayRefund(true);
           } else {
             addLog("Refund tx executed but REFUND_RESULT not found", "error");
-            alert("Refund tx executed but REFUND_RESULT not found in logs. Проверьте транзакцию: " + refundTx);
+            alert("Refund tx executed but REFUND_RESULT not found in logs. tx: " + refundTx);
           }
         } catch (refundErr) {
           addLog("agent.refund failed: " + (refundErr?.message || refundErr), "error");
-          // notify user
-          alert("Не дождались ORAO randomness и возврат через агента не удался: " + (refundErr?.message || refundErr).toString());
+          alert("Failed waiting ORAO randomness and agent refund failed too: " + (refundErr?.message || refundErr).toString());
         } finally {
           setSpinningInfinite(false);
+          stopInfiniteSpin();
           setWorking(false);
         }
         return;
       }
     }
 
-    // agent.resolve
     let resolveSig;
     try {
       const payload2 = {
@@ -539,6 +557,7 @@ export default function WheelGame() {
       addLog("agent.resolve failed: " + (e?.message || e), "error");
       setWorking(false);
       setSpinningInfinite(false);
+      stopInfiniteSpin();
       return;
     }
 
@@ -548,76 +567,55 @@ export default function WheelGame() {
       addLog("Parsed WHEEL_RESULT: num=" + parsed.number + " bps=" + parsed.multiplier_bps + " payout_net=" + parsed.payoutNetLamports.toString());
     } catch (e) {
       addLog("Failed to parse WHEEL_RESULT: " + (e?.message || e), "error");
-      // гарантируем очистку UI-флагов при ошибке
       setSpinningInfinite(false);
+      stopInfiniteSpin();
       setWorking(false);
-      setFinalText("Error parsing result; check logs");
+      setFinalText("Error parsing result;");
       return;
     }
 
-    // теперь безопасно используем parsed
-    const targetNum = parsed.number; // 1..100
+    const targetNum = parsed.number; 
     setResultNumber(targetNum);
     setPayoutSol(parsed.payoutNetSol);
-    setFinalText(parsed.payoutNetLamports > 0n ? `You won ${parsed.payoutNetSol} SOL` : "You lost");
+    setFinalText(parsed.payoutNetLamports > 0n ? `Вы выиграли ${parsed.payoutNetSol} SOL` : "Вы проиграли");
 
-    // compute target rotation:
-    // sector center angle (as drawn) = -90 + (n-1)*SECTOR_ANGLE + SECTOR_ANGLE/2
     const sectorCenter = -90 + (targetNum - 1) * SECTOR_ANGLE + (SECTOR_ANGLE / 2);
 
-    // We want sectorCenter + rotation = -90  (i.e. center at 12 o'clock)
-    // => rotation = -90 - sectorCenter
     const desiredFinal = -90 - sectorCenter;
 
-    // add some full rotations for drama (choose >0)
-    const extraFull = 3 + Math.floor(Math.random() * 3); // 3..5 extra spins
+    const extraFull = 3 + Math.floor(Math.random() * 3); 
 
-    // targetTotal is cumulative base + extra full turns + desired final offset
     const targetTotal = cumulativeBaseRotRef.current + extraFull * 360 + desiredFinal;
 
 
-    // stop infinite spin visually:
     setSpinningInfinite(false);
-    // small timeout to allow CSS class change to take effect before triggering transition
+    stopInfiniteSpin();
     await new Promise((r)=>setTimeout(r, 80));
 
-    // set transition (animate to targetTotal)
-    // set current rotation to cumulativeBaseRotRef.current (so smooth)
+    const base = rotationDeg % 360; 
     setRotationDeg(cumulativeBaseRotRef.current % 360);
-    // small delay to ensure DOM updated then apply transition
     await new Promise((r)=>setTimeout(r, 40));
-    // start transition
     setIsTransitioningToResult(true);
     setRotationDeg(targetTotal);
 
-    // wait for transition end
     const el = wheelRef.current;
     await waitForTransitionEnd(el);
 
-    // finalize: store new base rotation (mod 360 to keep numbers small)
-    cumulativeBaseRotRef.current = targetTotal % 360;
+    cumulativeBaseRotRef.current = ((targetTotal % 360) + 360) % 360;
     setIsTransitioningToResult(false);
     setWorking(false);
 
-    // --- overlay selection based on multiplier thresholds ---
-    // parsed.multiplier_bps expected from contract logs (bps: 10000 == 1.0)
-    const multiplierBps = Number(parsed.multiplier_bps || 0);
-    const multiplier = multiplierBps / 10000; // e.g. 15000 -> 1.5
-    const betSolLocal = betSol; // betSol defined at top of spinWheelOnChain
-    // computed total payout and net profit
-    const totalPayoutSol = betSolLocal * multiplier;
-    const netProfitSol = parsed.payoutNetSol; // already net profit from logs
 
-    // set overlay display values
+    const multiplierBps = Number(parsed.multiplier_bps || 0);
+    const multiplier = multiplierBps / 10000; 
+    const betSolLocal = betSol; 
+    const totalPayoutSol = betSolLocal * multiplier;
+    const netProfitSol = parsed.payoutNetSol; 
+
     setPayoutSolDisplay(totalPayoutSol);
     setNetProfitSolDisplay(netProfitSol);
     setMultiplierDisplay(multiplier.toFixed(2));
 
-    // decide which overlay to show:
-    // Loss: multiplier < 1.0
-    // Win (small): multiplier > 1.0 && multiplier < 10.0
-    // BigWin: multiplier >= 10.0 && multiplier <= 50.0
-    // (you can fine-tune thresholds if needed)
     if (multiplier < 1.0) {
       setShowOverlayLoss(true);
       setShowOverlayWin(false);
@@ -631,20 +629,16 @@ export default function WheelGame() {
       setShowOverlayLoss(false);
       setShowOverlayBigWin(false);
     } else {
-      // fallback (e.g. multiplier == 1.0) — consider it a loss/no-win
       setShowOverlayLoss(true);
       setShowOverlayWin(false);
       setShowOverlayBigWin(false);
     }
 
-    // show result message (already set finalText)
     addLog(`Wheel stopped at ${targetNum}. ${parsed.payoutNetLamports > 0n ? "WIN" : "LOSE"}`);
-  } // end spinWheelOnChain
+  } 
 
-  // wheel transform style depends on spinningInfinite / isTransitioningToResult / rotationDeg
   const wheelTransform = `rotate(${rotationDeg}deg)`;
 
-  // dynamic style for wheel: if spinningInfinite -> apply CSS animation; else transition to rotationDeg
   const wheelContainerStyle = {
     width: 360,
     height: 360,
@@ -658,12 +652,11 @@ export default function WheelGame() {
     margin: "0 auto",
   };
 
-  // style for pointer at top
   const pointerStyle = {
     position: "absolute",
     top: -8,
     left: "50%",
-    transform: "translateX(-50%) rotate(180deg)", // <- rotate 180° flips the triangle
+    transform: "translateX(-50%) rotate(180deg)", 
     zIndex: 20,
     width: 0,
     height: 0,
@@ -676,11 +669,6 @@ export default function WheelGame() {
   return (
     <div style={{ padding: 24, display: "flex", justifyContent: "center" }}>
       <style>{`
-        /* infinite spin */
-        @keyframes wheelSpinInfinite {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
         .wheel-rotation-infinite {
           animation: wheelSpinInfinite 1.2s linear infinite;
         }
@@ -708,8 +696,8 @@ export default function WheelGame() {
       `}</style>
 
       <div className="panel">
-        <h2 style={{ margin: "0 0 6px 0" }}>Fortune Wheel</h2>
-        <div style={{ color: "#444", marginBottom: 12 }}>Spin the wheel — payout depends on the landed sector (1–100).</div>
+        <h2 style={{ margin: "0 0 6px 0" }}>Колесо фортуны</h2>
+        <div style={{ color: "#444", marginBottom: 12 }}>Дэпаем и крутим колесо.</div>
 
         <div style={{ display: "flex", gap: 20 }}>
           <div style={{ width: 380 }}>
@@ -725,7 +713,6 @@ export default function WheelGame() {
                     transform: wheelTransform,
                     borderRadius: "50%",
                     overflow: "visible",
-                    ...(spinningInfinite ? { animation: "wheelSpinInfinite 1.2s linear infinite" } : {}),
                     ...(isTransitioningToResult ? { transition: "transform 4s cubic-bezier(.22,.9,.18,1)" } : {}),
                   }}
                 >
@@ -734,7 +721,6 @@ export default function WheelGame() {
                       {sectors.map((s, idx) => (
                         <path key={idx} d={wedgePath(idx + 1)} fill={s.color} stroke="#111827" strokeWidth="0.6" />
                       ))}
-                      {/* optional center circle */}
                       <circle cx={R} cy={R} r={36} fill="#111827" />
                       <text x={R} y={R} textAnchor="middle" fill="#fff" dy="8" fontWeight="700" fontSize="14">SPIN</text>
                     </g>
@@ -743,51 +729,101 @@ export default function WheelGame() {
               </div>
             </div>
 
-            <div style={{ marginTop: 14, display: "flex", gap: 12, alignItems: "center" }}>
-              <label style={{ width: 80 }}>Bet (SOL):</label>
-              <input value={betValue} onChange={(e)=>setBetValue(e.target.value)} style={{ width: 140, padding: 8, borderRadius: 8, border: "1px solid #e5e7eb" }} />
-              <button onClick={spinWheelOnChain} disabled={working} style={{ padding: "10px 14px", borderRadius: 8, background: "#16a34a", color: "#fff", marginLeft: 8 }}>
-                {working ? "Working..." : "Spin (on-chain)"}
+            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", marginTop: 14 }}>
+              <button
+                onClick={spinWheelOnChain}
+                disabled={working || spinningInfinite}
+                style={{
+                  padding: "10px 16px",
+                  borderRadius: 8,
+                  background: (working || spinningInfinite) ? "#374151" : "linear-gradient(270deg, #FFD700, #FFA500, #FFD700)",
+                  color: "#fff",
+                  fontWeight: 700,
+                  fontFamily: 'MyFont',
+                  border: "none",
+                  cursor: (working || spinningInfinite) ? "not-allowed" : "pointer",
+                }}
+                aria-label="Spin on-chain"
+              >
+                {working || spinningInfinite ? "КРУТИМ" : "КРУТАНУТЬ"}
               </button>
+
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: 12 }}>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  value={betValue}
+                  onChange={(e) => setBetValue(e.target.value)}
+                  placeholder="SOL"
+                  disabled={working || spinningInfinite}
+                  style={{
+                    padding: "8px 10px",
+                    borderRadius: 8,
+                    border: "1px solid rgba(0,0,0,0.12)",
+                    width: 100,
+                    textAlign: "center",
+                  }}
+                  aria-label="Ставка в SOL"
+                />
+
+                <span style={{ fontWeight: "bold" }}>≈</span>
+
+                <span style={{ minWidth: 110 }}>
+                  {(!betValue || !solPrice) ? "0 USD" : ( (Number(String(betValue).replace(",", ".")) || 0) * solPrice ).toFixed(9) + " USD"}
+                </span>
+
+                <button
+                  onClick={() => {
+                    const v = Number(String(betValue).replace(",", ".")) || 0;
+                    setBetValue(String(v * 2));
+                  }}
+                  disabled={working || spinningInfinite}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    background: "#512DA8",
+                    color: "#fff",
+                    fontWeight: 600,
+                    border: "none",
+                    cursor: (working || spinningInfinite) ? "not-allowed" : "pointer",
+                  }}
+                  aria-label="Удвоить"
+                >
+                  x2
+                </button>
+              </div>
             </div>
 
             <div style={{ marginTop: 10 }}>
               <div style={{ fontSize: 14 }}>{finalText ?? "-"}</div>
-              <div style={{ fontSize: 13, color: "#666", marginTop: 6 }}>Payout: {payoutSol.toFixed(9)} SOL</div>
+              <div style={{ fontSize: 13, color: "#666", marginTop: 6 }}>Выплата: {payoutSol.toFixed(9)} SOL</div>
               <div style={{ marginTop: 10, fontSize: 13, color: "#666" }}>
-                Result number: <strong style={{ fontSize: 18 }}>{resultNumber === null ? "-" : resultNumber}</strong>
+                Результат: <strong style={{ fontSize: 18 }}>{resultNumber === null ? "-" : resultNumber}</strong>
               </div>
             </div>
           </div>
 
           <div style={{ flex: 1 }}>
-            <h4 style={{ marginTop: 0 }}>Legend (categories)</h4>
+            <h4 style={{ marginTop: 0 }}>Сектора</h4>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
               {categories.map((c, i) => (
                 <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", padding: 8, borderRadius: 8, border: "1px solid #f1f5f9" }}>
                   <div style={{ width: 24, height: 24, background: categoryColors[i], borderRadius: 4 }} />
                   <div>
                     <div style={{ fontWeight: 700 }}>{c.start}{c.end !== c.start ? `–${c.end}` : ""}</div>
-                    <div style={{ fontSize: 12, color: "#666" }}>{(c.bps/10000).toFixed(2)}× ({c.bps} bps)</div>
+                    <div style={{ fontSize: 12, color: "#666" }}>×{(c.bps/10000).toFixed(2)} </div>
                   </div>
                 </div>
               ))}
             </div>
 
-            <div style={{ marginTop: 18 }}>
-              <h4 style={{ marginBottom: 8 }}>Controls / Diagnostics</h4>
-              <div style={{ fontSize: 13, color: "#666" }}>
-                - Wheel spins while waiting for ORAO. When result comes, it decelerates and lands on sector.<br/>
-                - If you see incorrect payouts: check config PDAs & agent logs.
-              </div>
-            </div>
           </div>
         </div>
 
         {showOverlayRefund && (
           <div style={{ position: "fixed", top:0, left:0, width:"100%", height:"100%", backgroundColor:"rgba(0,0,0,0.6)", display:"flex", justifyContent:"center", alignItems:"center", zIndex:9999, flexDirection:"column" }}>
             <div style={{ position:"absolute", top:20, color:"#fff", fontSize:44, fontWeight:700, textAlign:"center", width:"100%", fontFamily:'MyFont' }}>
-              Возврат: Выплата {payoutSolDisplay.toFixed(9)} SOL — Чистыми: {netProfitSolDisplay.toFixed(9)} SOL; кф = {multiplierDisplay}x
+              Возврат: Выплата {payoutSolDisplay.toFixed(9)} SOL 
             </div>
             <video src="/video/loss3.mp4" autoPlay style={{ width:"50%", height:"auto", borderRadius:12 }} onEnded={() => { setShowOverlayRefund(false); }} />
           </div>
@@ -796,7 +832,7 @@ export default function WheelGame() {
          {showOverlayWin && (
           <div style={{ position: "fixed", top:0, left:0, width:"100%", height:"100%", backgroundColor:"rgba(0,0,0,0.6)", display:"flex", justifyContent:"center", alignItems:"center", zIndex:9999, flexDirection:"column" }}>
             <div style={{ position:"absolute", top:20, color:"#fff", fontSize:44, fontWeight:700, textAlign:"center", width:"100%", fontFamily:'MyFont' }}>
-              Победа! Выигрыш: {netProfitSolDisplay.toFixed(9)} SOL — Выплата: {payoutSolDisplay.toFixed(9)} SOL; кф = {multiplierDisplay}x
+              Победа! Выплата: {payoutSolDisplay.toFixed(9)} SOL; кф = {multiplierDisplay}x
             </div>
             <video src="/video/win.mp4" autoPlay style={{ width:"50%", height:"auto", borderRadius:12 }} onEnded={() => { setShowOverlayWin(false); }} />
           </div>
@@ -814,7 +850,7 @@ export default function WheelGame() {
         {showOverlayBigWin && (
           <div style={{ position: "fixed", top:0, left:0, width:"100%", height:"100%", backgroundColor:"rgba(0,0,0,0.6)", display:"flex", justifyContent:"center", alignItems:"center", zIndex:9999, flexDirection:"column" }}>
             <div style={{ position:"absolute", top:20, color:"#fff", fontSize:56, fontWeight:800, textAlign:"center", width:"100%", fontFamily:'MyFont' }}>
-              Большой выигрыш!!! Профит: {netProfitSolDisplay.toFixed(9)} SOL — Выплата: {payoutSolDisplay.toFixed(9)} SOL; кф = {multiplierDisplay}x
+              Макс Вин!!!  Выплата: {payoutSolDisplay.toFixed(9)} SOL; кф = {multiplierDisplay}x
             </div>
             <video src="/video/BigWin.mp4" autoPlay style={{ width:"60%", height:"auto", borderRadius:12 }} onEnded={() => { setShowOverlayBigWin(false); }} />
           </div>
@@ -826,11 +862,10 @@ export default function WheelGame() {
           </div>
         )}
 
-        {/* logs bottom */}
         <div style={{ marginTop: 18 }}>
-          <h4 style={{ marginBottom: 8 }}>Logs (last {logs.length})</h4>
+          <h4 style={{ marginBottom: 8 }}>Логи (Последние {logs.length})</h4>
           <div ref={logsRef} className="logs-box">
-            {logs.length === 0 ? <div style={{ opacity: 0.6 }}>- no logs yet -</div> : logs.map((l,i)=>(
+            {logs.length === 0 ? <div style={{ opacity: 0.6 }}>- Пока не логов -</div> : logs.map((l,i)=>(
               <div key={i} style={{ color: l.level === "error" ? "#ffb4b4" : "#d1e7ff", marginBottom: 6 }}>{l.text}</div>
             ))}
           </div>

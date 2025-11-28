@@ -1,7 +1,3 @@
-// agent/agent_wheel_server.js
-// Express agent for wheel_game (request_vrf_agent / resolve_bet)
-// Improved: waits for tx confirmation, returns logs, better errors.
-
 const express = require("express");
 const cors = require("cors");
 const fs = require("fs");
@@ -9,16 +5,12 @@ const path = require("path");
 const anchor = require("@coral-xyz/anchor");
 const { Keypair, Connection, clusterApiUrl, PublicKey } = require("@solana/web3.js");
 
-// ---------- CONFIG ----------
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3004;
 const CLUSTER = process.env.CLUSTER || "devnet";
 const RPC = process.env.RPC_URL || clusterApiUrl(CLUSTER);
 
-// IDL path: prefer env IDL_PATH, fallback to ./wheel_game.json
 const IDL_PATH = process.env.IDL_PATH || path.join(process.cwd(), "wheel_game.json");
-// Agent key path
 const AGENT_KEY_PATH = process.env.AGENT_KEY || path.join(process.cwd(), "agent.json");
-// Optional explicit program id (recommended)
 const PROGRAM_ID_ENV = process.env.PROGRAM_ID || null;
 
 if (!fs.existsSync(IDL_PATH)) {
@@ -30,7 +22,6 @@ if (!fs.existsSync(AGENT_KEY_PATH)) {
   process.exit(1);
 }
 
-// load agent keypair
 let secret;
 try {
   secret = JSON.parse(fs.readFileSync(AGENT_KEY_PATH, "utf8"));
@@ -41,21 +32,17 @@ try {
 const agentKeypair = Keypair.fromSecretKey(Uint8Array.from(secret));
 const agentPubkey = agentKeypair.publicKey.toBase58();
 
-// connection & provider for agent
 const connection = new Connection(RPC, "confirmed");
 
-// minimal wallet object for Anchor provider using agentKeypair
 const agentWallet = {
   publicKey: agentKeypair.publicKey,
   signTransaction: async (tx) => {
-    // ensure recent blockhash & fee payer if missing (partial signing)
     try {
       if (!tx.recentBlockhash) {
         const { blockhash } = await connection.getLatestBlockhash("confirmed");
         tx.recentBlockhash = blockhash;
       }
     } catch (e) {
-      // ignore
     }
     tx.feePayer = tx.feePayer || agentKeypair.publicKey;
     tx.partialSign(agentKeypair);
@@ -70,7 +57,6 @@ const agentWallet = {
         tx.partialSign(agentKeypair);
       }
     } catch (e) {
-      // best-effort
       for (const tx of txs) tx.partialSign(agentKeypair);
     }
     return txs;
@@ -80,7 +66,6 @@ const agentWallet = {
 const agentProvider = new anchor.AnchorProvider(connection, agentWallet, { preflightCommitment: "confirmed" });
 anchor.setProvider(agentProvider);
 
-// load IDL and Program
 let idl = null;
 try {
   idl = JSON.parse(fs.readFileSync(IDL_PATH, "utf8"));
@@ -91,18 +76,15 @@ try {
 
 let program;
 try {
-  // If PROGRAM_ID is provided via env, prefer explicit constructor
   if (PROGRAM_ID_ENV) {
     const pid = new PublicKey(PROGRAM_ID_ENV);
     program = new anchor.Program(idl, pid, agentProvider);
     console.log("Constructed anchor.Program with explicit PROGRAM_ID:", pid.toBase58());
   } else {
-    // Try provider-style constructor (requires address metadata in IDL)
     try {
       program = new anchor.Program(idl, agentProvider);
       console.log("Constructed anchor.Program from IDL metadata (if present). ProgramId:", program.programId?.toBase58?.());
     } catch (e) {
-      // fallback: try to read idl.metadata.address or fail
       const maybeAddress = (idl?.metadata && idl.metadata.address) || null;
       if (maybeAddress) {
         program = new anchor.Program(idl, new PublicKey(maybeAddress), agentProvider);
@@ -125,12 +107,10 @@ console.log(" IDL:", IDL_PATH);
 console.log(" Program id (from IDL or program):", program.programId?.toBase58?.() ?? "(unknown)");
 console.log(" Listening on port", PORT);
 
-// ---------- EXPRESS APP ----------
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 
-// helper: fetch tx logs (confirmed/finalized)
 async function txLogs(txSig, commitment = "confirmed") {
   try {
     const tx = await connection.getTransaction(txSig, { commitment });
@@ -140,7 +120,6 @@ async function txLogs(txSig, commitment = "confirmed") {
   }
 }
 
-// helper: wait until transaction appears with meta (confirmed) or timeout
 async function waitTxConfirmed(sig, timeoutMs = 60000, pollInterval = 700) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -148,22 +127,17 @@ async function waitTxConfirmed(sig, timeoutMs = 60000, pollInterval = 700) {
       const tx = await connection.getTransaction(sig, { commitment: "confirmed" });
       if (tx && tx.meta) return tx;
     } catch (e) {
-      // transient RPC error - ignore and retry
     }
     await new Promise((r) => setTimeout(r, pollInterval));
   }
   return null;
 }
-
-// POST /agent/request
-// body: { seedPubkey, randomPda, networkState, vrfTreasury, vrfProgram, configPda }
 app.post("/agent/request", async (req, res) => {
   try {
     const b = req.body || {};
     const required = ["seedPubkey", "randomPda", "networkState", "vrfTreasury", "vrfProgram", "configPda"];
     for (const k of required) if (!b[k]) return res.json({ ok: false, error: `missing ${k}` });
 
-    // convert seedPubkey to Buffer (supports base58 Pubkey string)
     let seedBuf;
     try {
       seedBuf = new PublicKey(b.seedPubkey).toBuffer();
@@ -185,7 +159,6 @@ app.post("/agent/request", async (req, res) => {
 
     console.log(`request_vrf_agent: seed=${b.seedPubkey}, randomPda=${randomnessAccount.toBase58()}`);
 
-    // call the program method (agent signs)
     let txSig;
     try {
       txSig = await program.methods
@@ -201,7 +174,6 @@ app.post("/agent/request", async (req, res) => {
         })
         .rpc();
     } catch (e) {
-      // try to extract txSig from error object if present (some anchor errors include it)
       const maybeSig = e?.txSig || e?.signature || null;
       const logs = maybeSig ? await txLogs(maybeSig) : (e?.logs ?? []);
       console.error("request_vrf_agent rpc failed:", e && e.stack ? e.stack : e);
@@ -210,7 +182,6 @@ app.post("/agent/request", async (req, res) => {
 
     console.log("request_vrf_agent rpc returned, txSig:", txSig);
 
-    // wait for confirmed so randomness account likely exists and logs are available
     const txInfo = await waitTxConfirmed(txSig, 60000, 700);
     const logs = txInfo?.meta?.logMessages ?? await txLogs(txSig);
 
@@ -222,8 +193,6 @@ app.post("/agent/request", async (req, res) => {
   }
 });
 
-// POST /agent/resolve
-// body: { playerPubkey, randomPda, betPda, vaultPda, treasuryPda, configPda }
 app.post("/agent/resolve", async (req, res) => {
   try {
     const b = req.body || {};
@@ -313,5 +282,5 @@ app.get("/health", (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Wheel Agent listening: http://localhost:${PORT} (CORS enabled)`);
+  console.log(`Wheel Agent listening: http://localhost:${PORT}`);
 });
