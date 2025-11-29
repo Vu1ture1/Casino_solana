@@ -47,6 +47,27 @@ export default function DiceRangeGame() {
   const [netProfitSolDisplay, setNetProfitSolDisplay] = useState(0); 
   const [multiplierDisplay, setMultiplierDisplay] = useState("0.00"); 
 
+  const prevAudioVolRef = useRef(null);
+
+useEffect(() => {
+  const audio = document.getElementById("bg-audio");
+  if (!audio) return;
+
+  const anyOverlayShown = !!(showOverlayWin || showOverlayLoss || showOverlayBigWin || showOverlayRefund);
+
+  if (anyOverlayShown) {
+    if (prevAudioVolRef.current === null) prevAudioVolRef.current = audio.volume;
+    audio.volume = 0.1;
+  } else {
+    if (prevAudioVolRef.current !== null) {
+      audio.volume = prevAudioVolRef.current;
+      prevAudioVolRef.current = null;
+    } else {
+      audio.volume = 0.6; 
+    }
+  }
+}, [showOverlayWin, showOverlayLoss, showOverlayBigWin, showOverlayRefund]);
+
 
   const animRef = useRef(null);
 
@@ -107,6 +128,7 @@ export default function DiceRangeGame() {
     const interval = setInterval(updateBalance, 3000);
     return () => { mounted = false; clearInterval(interval); };
   }, [connected, publicKey]);
+
 
   async function getSolPrice() {
     try {
@@ -211,6 +233,23 @@ export default function DiceRangeGame() {
 
     throw new Error("No transaction meta/logs available after retries");
   }
+
+async function waitForRandomnessAccount(connection, randomPda, timeoutMs = 90000) {
+  addLog("Searching for randomness account: " + randomPda.toBase58());
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const info = await connection.getAccountInfo(randomPda, "confirmed");
+      if (info && info.lamports > 0 && info.data && info.data.length > 0) {
+        addLog("Randomness account exists (lamports=" + info.lamports + ", len=" + info.data.length + ")");
+        return info;
+      }
+    } catch (e) {
+    }
+    await new Promise((r) => setTimeout(r, 700));
+  }
+  throw new Error("Timeout waiting for randomness account: " + randomPda.toBase58());
+}
 
   async function waitForTxConfirmed(connection, sig, timeoutMs = 90_000) {
     addLog("Waiting for tx confirmation: " + sig);
@@ -366,86 +405,104 @@ export default function DiceRangeGame() {
       addLog("request tx did not confirm in time: " + (e?.message || e), "error");
     }
 
-    addLog("Waiting ORAO fulfillment (using api vrf.waitFulfilled) ...");
+
+    addLog("Waiting ORAO fulfillment (checking for randomness account first) ...");
     try {
+      await waitForRandomnessAccount(connection, randomPda, 50_000);
+      addLog("Randomness account detected; calling vrf.waitFulfilled()...");
+
       const waitFulfilledPromise = vrfSdk.waitFulfilled(seedBytes);
-      const timeoutPromise = new Promise((_, rej) => setTimeout(() => rej(new Error("vrf.waitFulfilled timeout (api)")), 20_000)); 
+      const timeoutPromise = new Promise((_, rej) => setTimeout(() => rej(new Error("waitFulfilled timeout")), 50_000));
       await Promise.race([waitFulfilledPromise, timeoutPromise]);
-      addLog("vrf.waitFulfilled api success");
-    } catch (fastErr) {
-      addLog("Api failed or timed out: " + (fastErr?.message || fastErr) + " - falling back to manual check", "info");
-      try {
-        await waitForRandomnessFulfilledRobust(vrfSdk, connection, seedBytes, randomPda, { pollIntervalMs: 700, timeoutMs: 20_000 });
-        addLog("Manual check: ORAO fulfilled");
-      } catch (pollErr) {
-        addLog("Manual check: " + (pollErr?.message || pollErr), "error");
-        addLog("Trying to refund...");
-        try {
-          const refundPayload = {
-            playerPubkey: publicKey.toBase58(),
-            randomPda: randomPda.toBase58(),
-            betPda: betPda.toBase58(),
-            vaultPda: vaultPda.toBase58(),
-            treasuryPda: treasuryPda.toBase58(),
-            configPda: (await PublicKey.findProgramAddress([Buffer.from("config_agent_dice_v2")], PROGRAM_ID))[0].toBase58(),
-          };
-          addLog("Calling agent /agent/refund ...");
-          const refundResp = await fetch(`${AGENT_BASE}/agent/refund`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(refundPayload),
-          });
 
-          let refundJson;
-          try { refundJson = await refundResp.json(); } catch (e) { throw new Error("agent refund returned non-json or network error"); }
-          if (!refundJson.ok) {
-            addLog("Agent /refund returned failure: " + (refundJson.error || JSON.stringify(refundJson)), "error");
-            throw new Error("Agent refund failure: " + (refundJson.error || "unknown"));
-          }
-
-          const refundTxSig = refundJson.txSig;
-          addLog("agent.refund tx: " + refundTxSig);
-
-          try {
-            await waitForTxConfirmed(connection, refundTxSig, 30_000);
-            addLog("Refund tx confirmed: " + refundTxSig);
-          } catch (e) {
-            addLog("Refund tx did not confirm in time: " + (e?.message || e), "error");
-            throw e;
-          }
-
-          try {
-            const parsedRefund = await parseDiceResultFromTx(connection, refundTxSig);
-            if (parsedRefund.event === "refund") {
-              addLog("REFUND_RESULT received via tx: bet_amount=" + parsedRefund.bet_amount + ", compensation=" + parsedRefund.compensation);
-              const betAmountLam = BigInt(parsedRefund.bet_amount || 0);
-              const compLam = BigInt(parsedRefund.compensation || 0);
-              const refundTotalLam = betAmountLam + compLam;
-              const refundTotalSol = Number(refundTotalLam) / LAMPORTS_PER_SOL;
-              const betSolLocal = parseBet();
-
-              setPayoutSolDisplay(refundTotalSol);
-              const netProfit = refundTotalSol - betSolLocal;
-              setNetProfitSolDisplay(netProfit);
-              setMultiplierDisplay(betSolLocal > 0 ? (refundTotalSol / betSolLocal).toFixed(2) : "0.00");
-
-              setResult("refund");
-              setShowOverlayRefund(true);
-            } else {
-              addLog("Refund tx did not contain REFUND_RESULT event (got " + parsedRefund.event + ")", "error");
-            }
-          } catch (e) {
-            addLog("Failed to parse refund tx logs: " + (e?.message || e), "error");
-          }
-        } catch (refundErr) {
-          console.error("agent.refund failed:", refundErr);
-          addLog("agent.refund failed: " + (refundErr?.message || refundErr), "error");
-        } finally {
-          setWorking(false);
-        }
-        return;
-      }
+      addLog("ORAO fulfilled randomness (api check)");
+    } catch (e) {
+      addLog("ORAO manual check");
+      //setWorking(false);
+      //alert("Не дождались ORAO randomness: " + (e?.message || e).toString());
+      //return;
     }
+
+    // addLog("Waiting ORAO fulfillment (using api vrf.waitFulfilled) ...");
+    // try {
+    //   const waitFulfilledPromise = vrfSdk.waitFulfilled(seedBytes);
+    //   const timeoutPromise = new Promise((_, rej) => setTimeout(() => rej(new Error("vrf.waitFulfilled timeout (api)")), 20_000)); 
+    //   await Promise.race([waitFulfilledPromise, timeoutPromise]);
+    //   addLog("vrf.waitFulfilled api success");
+    // } catch (fastErr) {
+    //   addLog("Api failed or timed out: " + (fastErr?.message || fastErr) + " - falling back to manual check", "info");
+    //   try {
+    //     await waitForRandomnessFulfilledRobust(vrfSdk, connection, seedBytes, randomPda, { pollIntervalMs: 700, timeoutMs: 20_000 });
+    //     addLog("Manual check: ORAO fulfilled");
+    //   } catch (pollErr) {
+    //     addLog("Manual check: " + (pollErr?.message || pollErr), "error");
+    //     addLog("Trying to refund...");
+    //     try {
+    //       const refundPayload = {
+    //         playerPubkey: publicKey.toBase58(),
+    //         randomPda: randomPda.toBase58(),
+    //         betPda: betPda.toBase58(),
+    //         vaultPda: vaultPda.toBase58(),
+    //         treasuryPda: treasuryPda.toBase58(),
+    //         configPda: (await PublicKey.findProgramAddress([Buffer.from("config_agent_dice_v2")], PROGRAM_ID))[0].toBase58(),
+    //       };
+    //       addLog("Calling agent /agent/refund ...");
+    //       const refundResp = await fetch(`${AGENT_BASE}/agent/refund`, {
+    //         method: "POST",
+    //         headers: { "Content-Type": "application/json" },
+    //         body: JSON.stringify(refundPayload),
+    //       });
+
+    //       let refundJson;
+    //       try { refundJson = await refundResp.json(); } catch (e) { throw new Error("agent refund returned non-json or network error"); }
+    //       if (!refundJson.ok) {
+    //         addLog("Agent /refund returned failure: " + (refundJson.error || JSON.stringify(refundJson)), "error");
+    //         throw new Error("Agent refund failure: " + (refundJson.error || "unknown"));
+    //       }
+
+    //       const refundTxSig = refundJson.txSig;
+    //       addLog("agent.refund tx: " + refundTxSig);
+
+    //       try {
+    //         await waitForTxConfirmed(connection, refundTxSig, 30_000);
+    //         addLog("Refund tx confirmed: " + refundTxSig);
+    //       } catch (e) {
+    //         addLog("Refund tx did not confirm in time: " + (e?.message || e), "error");
+    //         throw e;
+    //       }
+
+    //       try {
+    //         const parsedRefund = await parseDiceResultFromTx(connection, refundTxSig);
+    //         if (parsedRefund.event === "refund") {
+    //           addLog("REFUND_RESULT received via tx: bet_amount=" + parsedRefund.bet_amount + ", compensation=" + parsedRefund.compensation);
+    //           const betAmountLam = BigInt(parsedRefund.bet_amount || 0);
+    //           const compLam = BigInt(parsedRefund.compensation || 0);
+    //           const refundTotalLam = betAmountLam + compLam;
+    //           const refundTotalSol = Number(refundTotalLam) / LAMPORTS_PER_SOL;
+    //           const betSolLocal = parseBet();
+
+    //           setPayoutSolDisplay(refundTotalSol);
+    //           const netProfit = refundTotalSol - betSolLocal;
+    //           setNetProfitSolDisplay(netProfit);
+    //           setMultiplierDisplay(betSolLocal > 0 ? (refundTotalSol / betSolLocal).toFixed(2) : "0.00");
+
+    //           setResult("refund");
+    //           setShowOverlayRefund(true);
+    //         } else {
+    //           addLog("Refund tx did not contain REFUND_RESULT event (got " + parsedRefund.event + ")", "error");
+    //         }
+    //       } catch (e) {
+    //         addLog("Failed to parse refund tx logs: " + (e?.message || e), "error");
+    //       }
+    //     } catch (refundErr) {
+    //       console.error("agent.refund failed:", refundErr);
+    //       addLog("agent.refund failed: " + (refundErr?.message || refundErr), "error");
+    //     } finally {
+    //       setWorking(false);
+    //     }
+    //     return;
+    //   }
+    // }
 
     let resolveSig;
     try {
@@ -687,41 +744,106 @@ export default function DiceRangeGame() {
       </div>
 
       {showOverlayWin && (
-        <div style={{ position: "fixed", top:0, left:0, width:"100%", height:"100%", backgroundColor:"rgba(0,0,0,0.6)", display:"flex", justifyContent:"center", alignItems:"center", zIndex:9999, flexDirection:"column" }}>
-          <div style={{ position:"absolute", top:20, color:"#fff", fontSize:65, fontWeight:700, textAlign:"center", width:"100%", fontFamily:'MyFont' }}>
+        <div
+          onClick={() => {
+            setShowOverlayWin(false);
+          }}
+          style={{
+            position: "fixed", top: 0, left: 0, width: "100%", height: "100%",
+            backgroundColor: "rgba(0,0,0,0.6)", display: "flex",
+            justifyContent: "center", alignItems: "center", zIndex: 9999, flexDirection: "column"
+          }}
+        >
+          <div style={{ position: "absolute", top: 20, color: "#fff", fontSize: 65, fontWeight: 700, textAlign: "center", width: "100%", fontFamily: 'MyFont' }}>
             Профит: {netProfitSolDisplay.toFixed(9)} SOL - Выплата: {payoutSolDisplay.toFixed(9)} SOL; кф = {multiplierDisplay}x
           </div>
-          <video src="/video/win.mp4" autoPlay style={{ width:"50%", height:"auto", borderRadius:12 }} onEnded={() => { const audio = document.getElementById("bg-audio"); if (audio) audio.volume = 0.6; setShowOverlayWin(false); }} />
+
+          <video
+            src="/video/win.mp4"
+            autoPlay
+            style={{ width: "50%", height: "auto", borderRadius: 12 }}
+            onEnded={() => {
+              setShowOverlayWin(false);
+            }}
+          />
         </div>
       )}
 
       {showOverlayLoss && (
-        <div style={{ position: "fixed", top:0, left:0, width:"100%", height:"100%", backgroundColor:"rgba(0,0,0,0.6)", display:"flex", justifyContent:"center", alignItems:"center", zIndex:9999, flexDirection:"column" }}>
-          <div style={{ position:"absolute", top:20, color:"#fff", fontSize:90, fontWeight:700, textAlign:"center", width:"100%", fontFamily:'MyFont' }}>
+        <div
+          onClick={() => {
+            setShowOverlayLoss(false);
+          }}
+          style={{
+            position: "fixed", top: 0, left: 0, width: "100%", height: "100%",
+            backgroundColor: "rgba(0,0,0,0.6)", display: "flex",
+            justifyContent: "center", alignItems: "center", zIndex: 9999, flexDirection: "column"
+          }}
+        >
+          <div style={{ position: "absolute", top: 20, color: "#fff", fontSize: 90, fontWeight: 700, textAlign: "center", width: "100%", fontFamily: 'MyFont' }}>
             Проигрыш
           </div>
-          <video src="/video/loss3.mp4" autoPlay style={{ width:"50%", height:"auto", borderRadius:12 }} onEnded={() => { const audio = document.getElementById("bg-audio"); if (audio) audio.volume = 0.6; setShowOverlayLoss(false); }} />
+
+          <video
+            src="/video/Loss_6.mp4"
+            autoPlay
+            style={{ width: "auto", height: "70%", borderRadius: 12 }}
+            onEnded={() => {
+              setShowOverlayLoss(false);
+            }}
+          />
         </div>
       )}
 
       {showOverlayBigWin && (
-        <div style={{ position: "fixed", top:0, left:0, width:"100%", height:"100%", backgroundColor:"rgba(0,0,0,0.6)", display:"flex", justifyContent:"center", alignItems:"center", zIndex:9999, flexDirection:"column" }}>
-          <div style={{ position:"absolute", top:20, color:"#fff", fontSize:65, fontWeight:700, textAlign:"center", width:"100%", fontFamily:'MyFont' }}>
+        <div
+          onClick={() => {
+            setShowOverlayBigWin(false);
+          }}
+          style={{
+            position: "fixed", top: 0, left: 0, width: "100%", height: "100%",
+            backgroundColor: "rgba(0,0,0,0.6)", display: "flex",
+            justifyContent: "center", alignItems: "center", zIndex: 9999, flexDirection: "column"
+          }}
+        >
+          <div style={{ position: "absolute", top: 20, color: "#fff", fontSize: 65, fontWeight: 700, textAlign: "center", width: "100%", fontFamily: 'MyFont' }}>
             Макс вин!!! Выплата: {payoutSolDisplay.toFixed(9)} SOL; кф = {multiplierDisplay}x
           </div>
-          <video src="/video/BigWin.mp4" autoPlay style={{ width:"50%", height:"auto", borderRadius:12 }} onEnded={() => { const audio = document.getElementById("bg-audio"); if (audio) audio.volume = 0.6; setShowOverlayBigWin(false); }} />
+
+          <video
+            src="/video/BigWin.mp4"
+            autoPlay
+            style={{ width: "50%", height: "auto", borderRadius: 12 }}
+            onEnded={() => {
+              setShowOverlayBigWin(false);
+            }}
+          />
         </div>
       )}
 
       {showOverlayRefund && (
-      <div style={{ position: "fixed", top:0, left:0, width:"100%", height:"100%", backgroundColor:"rgba(0,0,0,0.6)", display:"flex", justifyContent:"center", alignItems:"center", zIndex:9999, flexDirection:"column" }}>
-        <div style={{ position:"absolute", top:20, color:"#fff", fontSize:44, fontWeight:700, textAlign:"center", width:"100%", fontFamily:'MyFont' }}>
-          Возврат ставки: Выплата: {payoutSolDisplay.toFixed(9)} SOL
-        </div>
+        <div
+          onClick={() => {              
+              setShowOverlayRefund(false)}}
+          style={{
+            position: "fixed", top: 0, left: 0, width: "100%", height: "100%",
+            backgroundColor: "rgba(0,0,0,0.6)", display: "flex",
+            justifyContent: "center", alignItems: "center", zIndex: 9999, flexDirection: "column"
+          }}
+        >
+          <div style={{ position: "absolute", top: 20, color: "#fff", fontSize: 44, fontWeight: 700, textAlign: "center", width: "100%", fontFamily: 'MyFont' }}>
+            Возврат ставки: Выплата: {payoutSolDisplay.toFixed(9)} SOL
+          </div>
 
-        <video src="/video/loss3.mp4" autoPlay style={{ width:"50%", height:"auto", borderRadius:12 }} onEnded={() => { setShowOverlayRefund(false); }} />
-      </div>
-    )}
+          <video
+            src="/video/Loss_8.mp4"
+            autoPlay
+            style={{ width: "auto", height: "70%", borderRadius: 12 }}
+            onEnded={() => { 
+              setShowOverlayRefund(false); }}
+          />
+        </div>
+      )}
 
       {showOverlayNoMoney && (
         <div style={{ position:"fixed", top:0, left:0, width:"100%", height:"100%", backgroundColor:"rgba(0,0,0,0.6)", display:"flex", justifyContent:"center", alignItems:"center", zIndex:9999 }}>

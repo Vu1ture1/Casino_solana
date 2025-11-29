@@ -9,6 +9,7 @@ import { SolanaWalletProvider } from "./solana_provider";
 import ScratchCard3x3 from "./scratch_maps";
 import DiceRangeGame from "./cube";
 import WheelGame from "./WheelGame";
+import { AudioProvider } from "./audioContext";
 
 
 function App() {
@@ -18,6 +19,7 @@ function App() {
    <>
   <BrowserRouter>
       <SolanaWalletProvider>
+        <AudioProvider> 
         <Header />
         <Routes>
           <Route
@@ -78,6 +80,7 @@ function App() {
          />
           <Route path="/" element={<Navigate to="/slot" replace />} />
         </Routes>
+        </AudioProvider>
       </SolanaWalletProvider>
     </BrowserRouter>
 </>

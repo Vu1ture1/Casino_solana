@@ -1,42 +1,25 @@
-import React, { useEffect, useRef, useState } from "react";
+// src/header.jsx
+import React, { useEffect, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { Connection, clusterApiUrl, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { SolanaConnect } from "./connect_wallet";
 import { FaVolumeUp, FaVolumeMute } from "react-icons/fa";
+import { useAudio } from "./audioContext";
 
 export default function Header() {
-  const [audioPlaying, setAudioPlaying] = useState(false);
-  const audioRef = useRef(null);
   const { publicKey, connected } = useWallet();
   const [balance, setBalance] = useState(null);
 
-  useEffect(() => {
-    const audioEl = document.getElementById("bg-audio");
-    if (!audioEl) {
-      console.warn("Элемент #bg-audio не найден в DOM");
-      return;
-    }
-    audioRef.current = audioEl;
-
-    audioEl.loop = true;
-    audioEl.volume = 0.5;
-    audioEl.muted = true;
-
-    try {
-      const playResult = audioEl.play();
-      if (playResult && typeof playResult.then === "function") {
-        playResult.catch((err) => {
-          console.log("Автоплей заблокирован (catch):", err);
-        });
-      }
-    } catch (err) {
-      console.log("Ошибка при попытке play():", err);
-    }
-
-    return () => {
-      audioRef.current = null;
-    };
-  }, []);
+  const {
+    playing,
+    muted,
+    trackIndex,
+    tracks,
+    togglePlay,
+    toggleMute,
+    nextTrack,
+    prevTrack,
+  } = useAudio();
 
   useEffect(() => {
     if (!connected || !publicKey) return;
@@ -57,31 +40,18 @@ export default function Header() {
     return () => clearInterval(interval);
   }, [connected, publicKey]);
 
-  const toggleAudio = () => {
-    const a = audioRef.current;
-    if (!a) {
-      console.warn("Аудио не инициализировано");
+  const handleToggleAudio = async () => {
+    if (!playing) {
+      await togglePlay();
+      if (muted) {
+        toggleMute();
+      }
       return;
     }
-
-    if (!a.paused) {
-      a.pause();
-      setAudioPlaying(false);
-    } else {
-      a.muted = false;
-      try {
-        const playResult = a.play();
-        if (playResult && typeof playResult.then === "function") {
-          playResult.catch((err) => {
-            console.warn("play() отклонился после клика:", err);
-          });
-        }
-      } catch (err) {
-        console.warn("Ошибка play() после клика:", err);
-      }
-      setAudioPlaying(true);
-    }
+    await togglePlay();
   };
+
+  const currentTrackName = tracks && tracks.length > 0 ? tracks[trackIndex]?.split("/").pop() : "";
 
   return (
     <header
@@ -92,10 +62,10 @@ export default function Header() {
         justifyContent: "space-between",
         alignItems: "center",
         borderRadius: "5px",
-        position: "static",   
+        position: "static",
         zIndex: 2000,
         background: "transparent",
-        marginBottom: "180px", 
+        marginBottom: "180px",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
@@ -124,23 +94,51 @@ export default function Header() {
         <SolanaConnect />
 
         {connected && (
-          <p style={{
-            fontSize: "18px",
-            padding: "13px",
-            backgroundColor: "#512DA8",
-            borderRadius: "6px",
-            fontFamily: 'MyFont',
-            margin: 0,
-            color: "#fff", 
-          }}>
+          <p
+            style={{
+              fontSize: "18px",
+              padding: "13px",
+              backgroundColor: "#512DA8",
+              borderRadius: "6px",
+              fontFamily: "MyFont",
+              margin: 0,
+              color: "#fff",
+            }}
+          >
             Баланс: {balance !== null ? Number(balance).toFixed(9) + " SOL" : "Загрузка..."}
           </p>
         )}
 
+        <div style={{ color: "#fff", fontSize: 12, textAlign: "center", minWidth: 140, backgroundColor: "#512DA8", }}>
+          <div style={{ opacity: 0.9 }}>{currentTrackName || "— музыка —"}</div>
+          <div style={{ fontSize: 11, color: "#ddd" }}>{playing ? (muted ? "muted" : "playing") : "paused"}</div>
+        </div>
+
         <button
-          onClick={toggleAudio}
+          onClick={prevTrack}
+          title="Previous track"
           style={{
-            background: audioPlaying ? "#2ecc71" : "#e74c3c",
+            background: "transparent",
+            border: "1px solid rgba(255,255,255,0.08)",
+            color: "#fff",
+            padding: "6px 8px",
+            borderRadius: "6px",
+            backgroundColor: "#512DA8",
+            cursor: "pointer",
+            height: "48px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            marginRight: 6,
+          }}
+        >
+          {"⟸"}
+        </button>
+
+        <button
+          onClick={handleToggleAudio}
+          style={{
+            background: playing && !muted ? "#2ecc71" : "#e74c3c",
             border: "none",
             color: "#fff",
             padding: "6px 12px",
@@ -151,11 +149,33 @@ export default function Header() {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            fontSize: "20px"
+            fontSize: "20px",
           }}
         >
-          {audioPlaying ? <FaVolumeUp /> : <FaVolumeMute />}
+          {!muted && playing ? <FaVolumeUp /> : <FaVolumeMute />}
         </button>
+
+        <button
+          onClick={nextTrack}
+          title="Next track"
+          style={{
+            background: "transparent",
+            border: "1px solid rgba(255,255,255,0.08)",
+            color: "#fff",
+            padding: "6px 8px",
+            backgroundColor: "#512DA8",
+            borderRadius: "6px",
+            cursor: "pointer",
+            height: "48px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            marginLeft: 6,
+          }}
+        >
+          {"⟹"}
+        </button>
+
       </div>
     </header>
   );

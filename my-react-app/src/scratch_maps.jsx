@@ -45,6 +45,27 @@ export default function ScratchCard3x3({ images = [
   const [showOverlayBigWin, setShowOverlayBigWin] = useState(false);
   const [showOverlayNoMoney, setShowOverlayNoMoney] = useState(false);
 
+  const prevAudioVolRef = useRef(null);
+
+  useEffect(() => {
+    const audio = document.getElementById("bg-audio");
+    if (!audio) return;
+
+    const anyOverlayShown = !!(showOverlayWin || showOverlayLoss || showOverlayBigWin);
+
+    if (anyOverlayShown) {
+      if (prevAudioVolRef.current === null) prevAudioVolRef.current = audio.volume;
+      audio.volume = 0.1;
+    } else {
+      if (prevAudioVolRef.current !== null) {
+        audio.volume = prevAudioVolRef.current;
+        prevAudioVolRef.current = null;
+      } else {
+        audio.volume = 0.6; 
+      }
+    }
+  }, [showOverlayWin, showOverlayLoss, showOverlayBigWin]);
+
   const [multValue, setMultValue] = useState("");
   const [balance, setBalance] = useState(null);
   const [x, setX] = useState(1.0);
@@ -371,14 +392,14 @@ export default function ScratchCard3x3({ images = [
     }
 
     try {
-      await waitForRandomnessAccount(connectionLocal, randomPda, 90_000);
+      await waitForRandomnessAccount(connectionLocal, randomPda, 50_000);
       addLog("Randomness account detected; calling vrf.waitFulfilled()...");
       const waitFulfilledPromise = vrf.waitFulfilled(seedBytes);
-      const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error("waitFulfilled timeout after 60s")), 60_000));
+      const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error("waitFulfilled timeout after 60s")), 50_000));
       await Promise.race([waitFulfilledPromise, timeout]);
       addLog("ORAO fulfilled randomness");
     } catch (e) {
-      addLog("ORAO fulfillment / randomness detection error: " + String(e));
+      addLog("ORAO manual check");
     }
 
     let resolveTx;
@@ -703,32 +724,68 @@ return (
     </div>
 
     {showOverlayWin && (
-      <div style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", backgroundColor: "rgba(0,0,0,0.6)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999, flexDirection: "column" }}>
+      <div
+        onClick={() => setShowOverlayWin(false)}
+        style={{
+          position: "fixed", top: 0, left: 0, width: "100%", height: "100%",
+          backgroundColor: "rgba(0,0,0,0.6)", display: "flex",
+          justifyContent: "center", alignItems: "center", zIndex: 9999, flexDirection: "column"
+        }}
+      >
         <div style={{ position: "absolute", top: 20, color: "#fff", fontSize: 48, fontWeight: 700, textAlign: "center", width: "100%", fontFamily: 'MyFont' }}>
           Выигрыш! Выплата: {(payoutLamports / LAMPORTS_PER_SOL).toFixed(9)} SOL ; кф = {multiplierDisplay}x
         </div>
 
-        <video src="/video/win.mp4" autoPlay style={{ width: "50%", height: "auto", borderRadius: "12px" }} onEnded={() => { setShowOverlayWin(false); }} />
+        <video
+          src="/video/win.mp4"
+          autoPlay
+          style={{ width: "50%", height: "auto", borderRadius: "12px" }}
+          onEnded={() => { setShowOverlayWin(false); }}
+        />
       </div>
     )}
 
     {showOverlayBigWin && (
-      <div style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", backgroundColor: "rgba(0,0,0,0.6)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999, flexDirection: "column" }}>
+      <div
+        onClick={() => setShowOverlayBigWin(false)}
+        style={{
+          position: "fixed", top: 0, left: 0, width: "100%", height: "100%",
+          backgroundColor: "rgba(0,0,0,0.6)", display: "flex",
+          justifyContent: "center", alignItems: "center", zIndex: 9999, flexDirection: "column"
+        }}
+      >
         <div style={{ position: "absolute", top: 20, color: "#fff", fontSize: 48, fontWeight: 700, textAlign: "center", width: "100%", fontFamily: 'MyFont' }}>
           Макс Вин!!! Выплата: {(payoutLamports / LAMPORTS_PER_SOL).toFixed(9)} SOL; кф = {multiplierDisplay}x
         </div>
 
-        <video src="/video/BigWin.mp4" autoPlay style={{ width: "50%", height: "auto", borderRadius: "12px" }} onEnded={() => { setShowOverlayBigWin(false); }} />
+        <video
+          src="/video/BigWin.mp4"
+          autoPlay
+          style={{ width: "50%", height: "auto", borderRadius: "12px" }}
+          onEnded={() => { setShowOverlayBigWin(false); }}
+        />
       </div>
     )}
 
     {showOverlayLoss && (
-      <div style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", backgroundColor: "rgba(0,0,0,0.6)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999, flexDirection: "column" }}>
+      <div
+        onClick={() => setShowOverlayLoss(false)}
+        style={{
+          position: "fixed", top: 0, left: 0, width: "100%", height: "100%",
+          backgroundColor: "rgba(0,0,0,0.6)", display: "flex",
+          justifyContent: "center", alignItems: "center", zIndex: 9999, flexDirection: "column"
+        }}
+      >
         <div style={{ position: "absolute", top: 20, color: "#fff", fontSize: 90, fontWeight: 700, textAlign: "center", width: "100%", fontFamily: 'MyFont' }}>
           Проигрыш
         </div>
 
-        <video src="/video/loss3.mp4" autoPlay style={{ width: "50%", height: "auto", borderRadius: "12px" }} onEnded={() => { setShowOverlayLoss(false); }} />
+        <video
+          src="/video/Loss_5.mp4"
+          autoPlay
+          style={{ width: "auto", height: "70%", borderRadius: "12px" }}
+          onEnded={() => { setShowOverlayLoss(false); }}
+        />
       </div>
     )}
 
